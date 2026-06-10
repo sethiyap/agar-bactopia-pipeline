@@ -1,0 +1,64 @@
+#!/bin/bash
+#PBS -P rg42
+#PBS -q normal
+#PBS -l walltime=01:00:00
+#PBS -l ncpus=1
+#PBS -l mem=8GB
+#PBS -l jobfs=10GB
+#PBS -l storage=scratch/rg42+gdata/rg42
+#PBS -N agrf_map
+#PBS -l wd
+
+set -euo pipefail
+
+AGRF_SHEET=${AGRF_SHEET:-}
+CONSOLIDATED_DIR=${CONSOLIDATED_DIR:-}
+MAP_OUTPUT=${MAP_OUTPUT:-}
+MAP_SCRIPT=${MAP_SCRIPT:-}
+MLST_FILE=${MLST_FILE:-}
+KLEBORATE_FILE=${KLEBORATE_FILE:-}
+FIMTYPER_FILE=${FIMTYPER_FILE:-}
+
+if [[ -z "$AGRF_SHEET" || ! -f "$AGRF_SHEET" ]]; then
+  echo "AGRF_SHEET not found: $AGRF_SHEET" >&2
+  exit 1
+fi
+
+if [[ -z "$CONSOLIDATED_DIR" || ! -d "$CONSOLIDATED_DIR" ]]; then
+  echo "CONSOLIDATED_DIR not found: $CONSOLIDATED_DIR" >&2
+  exit 1
+fi
+
+if [[ -z "$MAP_OUTPUT" ]]; then
+  echo "MAP_OUTPUT is required." >&2
+  exit 1
+fi
+
+if [[ -z "$MAP_SCRIPT" || ! -f "$MAP_SCRIPT" ]]; then
+  echo "MAP_SCRIPT not found: $MAP_SCRIPT" >&2
+  exit 1
+fi
+
+module purge
+module load R
+
+cmd=(
+  Rscript --vanilla "$MAP_SCRIPT"
+  --agrf-sheet "$AGRF_SHEET"
+  --consolidated-dir "$CONSOLIDATED_DIR"
+  --output "$MAP_OUTPUT"
+)
+
+if [[ -n "$MLST_FILE" ]]; then
+  cmd+=(--mlst "$MLST_FILE")
+fi
+
+if [[ -n "$KLEBORATE_FILE" ]]; then
+  cmd+=(--kleborate "$KLEBORATE_FILE")
+fi
+
+if [[ -n "$FIMTYPER_FILE" ]]; then
+  cmd+=(--fimtyper "$FIMTYPER_FILE")
+fi
+
+"${cmd[@]}"

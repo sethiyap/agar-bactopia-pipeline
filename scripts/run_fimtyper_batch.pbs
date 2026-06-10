@@ -1,0 +1,93 @@
+#!/bin/bash
+#PBS -P rg42
+#PBS -q normal
+#PBS -l walltime=24:00:00
+#PBS -l ncpus=8
+#PBS -l mem=32GB
+#PBS -l jobfs=100GB
+#PBS -l storage=scratch/rg42+gdata/rg42
+#PBS -N fimtyper_batch
+#PBS -l wd
+
+set -euo pipefail
+
+PROJECT=${PROJECT:-rg42}
+USER_NAME=${USER_NAME:-$USER}
+
+BASE_DIR=${BASE_DIR:-/g/data/${PROJECT}/${USER_NAME}/agar_bactopia_test}
+RESULTS_MAIN=${RESULTS_MAIN:-}
+RUN_LABEL=${RUN_LABEL:-fimtyper_${PBS_JOBID}}
+
+FIMTYPER_PIPELINE=${FIMTYPER_PIPELINE:-}
+FIMTYPER_CONFIG=${FIMTYPER_CONFIG:-}
+MERGE_FIMTYPER_SCRIPT=${MERGE_FIMTYPER_SCRIPT:-}
+FIMTYPER_PROFILE=${FIMTYPER_PROFILE:-}
+
+SING_CACHE=${SING_CACHE:-/scratch/${PROJECT}/${USER_NAME}/singularity_cache}
+RESULTS_ROOT=${RESULTS_ROOT:-/scratch/${PROJECT}/${USER_NAME}/bactopia_results}
+RESULTS_OUT=${RESULTS_OUT:-${RESULTS_ROOT}/${RUN_LABEL}}
+WORK_ROOT=${WORK_ROOT:-${RESULTS_ROOT}/_work/bactopia_fimtyper/${RUN_LABEL}}
+SCRATCH_ROOT=${SCRATCH_ROOT:-$WORK_ROOT}
+SCRATCH_RUN=${SCRATCH_ROOT}
+
+if [[ -z "$RESULTS_MAIN" ]]; then
+  echo "RESULTS_MAIN is required." >&2
+  exit 1
+fi
+
+if [[ -z "$FIMTYPER_PIPELINE" || ! -f "$FIMTYPER_PIPELINE" ]]; then
+  echo "FIMTYPER_PIPELINE not found: $FIMTYPER_PIPELINE" >&2
+  exit 1
+fi
+
+if [[ -z "$FIMTYPER_CONFIG" || ! -f "$FIMTYPER_CONFIG" ]]; then
+  echo "FIMTYPER_CONFIG not found: $FIMTYPER_CONFIG" >&2
+  exit 1
+fi
+
+if [[ ! -d "$RESULTS_MAIN" ]]; then
+  echo "RESULTS_MAIN not found: $RESULTS_MAIN" >&2
+  exit 1
+fi
+
+mkdir -p "$SCRATCH_RUN" "$RESULTS_OUT" "$SING_CACHE"
+
+module purge
+module load nextflow
+module load singularity
+
+export NXF_HOME="$SCRATCH_RUN/.nextflow"
+export NXF_WORK="$SCRATCH_RUN/work"
+export NXF_SINGULARITY_CACHEDIR="$SING_CACHE"
+export SINGULARITY_CACHEDIR="$SING_CACHE"
+mkdir -p "$NXF_HOME" "$NXF_WORK" "$NXF_SINGULARITY_CACHEDIR"
+
+cd "$SCRATCH_RUN"
+
+# Reused batch labels can leave stale sample directories from older runs.
+rm -rf results_fimtyper
+
+fimtyper_args=(
+  --results_main "$RESULTS_MAIN"
+  --outdir results_fimtyper
+  -work-dir "${NXF_WORK}/fimtyper"
+  -c "$FIMTYPER_CONFIG"
+)
+
+if [[ -n "$FIMTYPER_PROFILE" ]]; then
+  fimtyper_args+=(-profile "$FIMTYPER_PROFILE")
+fi
+
+nextflow run "$FIMTYPER_PIPELINE" "${fimtyper_args[@]}"
+
+if [[ -n "$MERGE_FIMTYPER_SCRIPT" ]]; then
+  if [[ ! -f "$MERGE_FIMTYPER_SCRIPT" ]]; then
+    echo "MERGE_FIMTYPER_SCRIPT not found: $MERGE_FIMTYPER_SCRIPT" >&2
+    exit 1
+  fi
+  bash "$MERGE_FIMTYPER_SCRIPT" results_fimtyper
+fi
+
+mkdir -p "$RESULTS_OUT/results_fimtyper"
+rsync -av --delete results_fimtyper/ "$RESULTS_OUT/results_fimtyper/"
+rsync -av .nextflow.log* "$RESULTS_OUT/" || true

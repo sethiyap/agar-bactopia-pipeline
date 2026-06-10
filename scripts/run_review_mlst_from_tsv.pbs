@@ -1,0 +1,89 @@
+#!/bin/bash
+#PBS -P rg42
+#PBS -q normal
+#PBS -l walltime=08:00:00
+#PBS -l ncpus=1
+#PBS -l mem=8GB
+#PBS -l jobfs=20GB
+#PBS -l storage=scratch/rg42+gdata/rg42
+#PBS -N review_mlst
+#PBS -l wd
+
+set -euo pipefail
+
+# Run standalone MLST only for samples flagged in the AGRF review-required TSV.
+#
+# Example:
+#   qsub scripts/run_review_mlst_from_tsv.pbs
+#
+# Optional override:
+#   qsub -v "REVIEW_TSV=/scratch/rg42/AGAR/intermediates/2025/B05/AGRF_samplesheet_with_results_review_required.tsv,RESULTS_ROOT=/scratch/rg42/AGAR/intermediates/2025/B05" \
+#     scripts/run_review_mlst_from_tsv.pbs
+#
+# Optional qsub variables:
+#   BATCH_PREFIX     Default: agar_batch
+#   MAPPED_TSV       Default: <RESULTS_ROOT>/AGRF_samplesheet_with_results.tsv
+#   OUTPUT_DIR       Default: <RESULTS_ROOT>/mlst_review_standalone
+#   MINIFORGE_ROOT   Default: /home/562/<user>/miniforge3
+#   MLST_ENV         Default: mlst_env
+#   MLST_SCHEME      Optional forced scheme, e.g. ecoli_achtman_4
+
+RESULTS_ROOT=${RESULTS_ROOT:-${PBS_O_WORKDIR:-$PWD}}
+BATCH_PREFIX=${BATCH_PREFIX:-agar_batch}
+REVIEW_TSV=${REVIEW_TSV:-${RESULTS_ROOT}/AGRF_samplesheet_with_results_review_required.tsv}
+MAPPED_TSV=${MAPPED_TSV:-${RESULTS_ROOT}/AGRF_samplesheet_with_results.tsv}
+OUTPUT_DIR=${OUTPUT_DIR:-${RESULTS_ROOT}/mlst_review_standalone}
+MINIFORGE_ROOT=${MINIFORGE_ROOT:-/home/562/${USER:-$USER}/miniforge3}
+MLST_ENV=${MLST_ENV:-mlst_env}
+MLST_SCHEME=${MLST_SCHEME:-}
+RUN_AGAR_ROOT=${RUN_AGAR_ROOT:-${PBS_O_WORKDIR:-$PWD}}
+
+SCRIPT_DIR="${RUN_AGAR_ROOT}/scripts"
+HELPER_SCRIPT="${SCRIPT_DIR}/run_review_mlst_from_tsv.sh"
+
+if [[ ! -f "$REVIEW_TSV" ]]; then
+  echo "REVIEW_TSV not found: $REVIEW_TSV" >&2
+  exit 1
+fi
+
+if [[ ! -d "$RESULTS_ROOT" ]]; then
+  echo "RESULTS_ROOT not found: $RESULTS_ROOT" >&2
+  exit 1
+fi
+
+if [[ ! -f "$HELPER_SCRIPT" ]]; then
+  echo "Helper script not found: $HELPER_SCRIPT" >&2
+  exit 1
+fi
+
+echo "Running review MLST helper"
+echo "REVIEW_TSV=$REVIEW_TSV"
+echo "RESULTS_ROOT=$RESULTS_ROOT"
+echo "BATCH_PREFIX=$BATCH_PREFIX"
+echo "MAPPED_TSV=$MAPPED_TSV"
+if [[ -n "$OUTPUT_DIR" ]]; then
+  echo "OUTPUT_DIR=$OUTPUT_DIR"
+fi
+if [[ -n "$MLST_SCHEME" ]]; then
+  echo "MLST_SCHEME=$MLST_SCHEME"
+fi
+
+export MINIFORGE_ROOT
+export MLST_ENV
+if [[ -n "$MLST_SCHEME" ]]; then
+  export MLST_SCHEME
+fi
+
+cmd=(
+  bash "$HELPER_SCRIPT"
+  --review-tsv "$REVIEW_TSV"
+  --results-root "$RESULTS_ROOT"
+  --batch-prefix "$BATCH_PREFIX"
+  --mapped-tsv "$MAPPED_TSV"
+)
+
+if [[ -n "$OUTPUT_DIR" ]]; then
+  cmd+=(--output-dir "$OUTPUT_DIR")
+fi
+
+"${cmd[@]}"

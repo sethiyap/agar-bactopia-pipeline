@@ -1,0 +1,40 @@
+#!/bin/bash
+#PBS -P rg42
+#PBS -q normal
+#PBS -l walltime=04:00:00
+#PBS -l ncpus=2
+#PBS -l mem=16GB
+#PBS -l jobfs=20GB
+#PBS -l storage=scratch/rg42+gdata/rg42
+#PBS -N merge_bactopia_results
+#PBS -l wd
+
+set -euo pipefail
+
+PROJECT=${PROJECT:-rg42}
+USER_NAME=${USER_NAME:-$USER}
+# Example B05 submission:
+# qsub -v "RESULTS_ROOT=/scratch/<project>/<user>/run_001,BATCH_PREFIX=agar_batch,CONSOLIDATED_OUTDIR=/scratch/<project>/<user>/run_001/agar_batch_consolidated,CONSOLIDATE_SCRIPT=/path/to/consolidate_bactopia_batches.R" scripts/run_consolidate_batches.pbs
+
+RESULTS_ROOT=${RESULTS_ROOT:-/scratch/${PROJECT}/${USER_NAME}/bactopia_results}
+BATCH_PREFIX=${BATCH_PREFIX:-agar_batch}
+CONSOLIDATED_OUTDIR=${CONSOLIDATED_OUTDIR:-${RESULTS_ROOT}/${BATCH_PREFIX}_consolidated}
+CONSOLIDATE_SCRIPT=${CONSOLIDATE_SCRIPT:-${BASE_DIR:-$PWD}/scripts/consolidate_bactopia_batches.R}
+
+if [[ ! -f "$CONSOLIDATE_SCRIPT" ]]; then
+  echo "CONSOLIDATE_SCRIPT not found: $CONSOLIDATE_SCRIPT" >&2
+  exit 1
+fi
+
+if [[ ! -d "$RESULTS_ROOT" ]]; then
+  echo "RESULTS_ROOT not found: $RESULTS_ROOT" >&2
+  exit 1
+fi
+
+module purge
+module load R
+
+Rscript "$CONSOLIDATE_SCRIPT" \
+  --results-root "$RESULTS_ROOT" \
+  --batch-prefix "$BATCH_PREFIX" \
+  --output-dir "$CONSOLIDATED_OUTDIR"

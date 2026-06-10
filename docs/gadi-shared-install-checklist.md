@@ -47,6 +47,7 @@ These are required runtime dependencies and should be available on Gadi:
 - module environment with `nextflow`, `singularity`, and `R`
 - writable scratch locations for users
 - optional Miniforge/Conda MLST review environment
+- Python with `openpyxl` for final workbook export
 
 ## Gadi Setup Steps
 

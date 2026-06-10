@@ -43,9 +43,11 @@ Environment variables:
   MAP_AGRF_RESULTS       Default: 1. Set to 0 to skip post-consolidation AGRF mapping
   RUN_MLST_REVIEW        Default: 1. Set to 0 to skip the standalone MLST review follow-up
   RUN_POST_REVIEW_MAP    Default: 1 when RUN_MLST_REVIEW=1. Set to 0 to skip final AGRF remapping with reviewed MLST calls
+  RUN_EXPORT_RESULTS_WORKBOOK Default: 1. Set to 0 to skip final Excel workbook export
   MAP_OUTPUT             Default: <RESULTS_ROOT>/AGRF_samplesheet_with_results.tsv
   REVIEW_OUTPUT_DIR      Default: <RESULTS_ROOT>/mlst_review_standalone
   POST_REVIEW_MAP_OUTPUT Default: <RESULTS_ROOT>/AGRF_samplesheet_with_results_post_review.tsv
+  RESULTS_WORKBOOK_OUTPUT Default: <RESULTS_ROOT>/<basename(RESULTS_ROOT)>_results.xlsx
   LOG_FILE               Default: <RESULTS_ROOT>/submit_agar_full_pipeline_<timestamp>.log
 
 All environment variables used by submit_bactopia_batch_pipeline.sh are also honored,
@@ -122,9 +124,11 @@ skip_validate=${SKIP_VALIDATE:-0}
 map_agrf_results=${MAP_AGRF_RESULTS:-1}
 run_mlst_review=${RUN_MLST_REVIEW:-1}
 run_post_review_map=${RUN_POST_REVIEW_MAP:-1}
+run_export_results_workbook=${RUN_EXPORT_RESULTS_WORKBOOK:-1}
 map_output=${MAP_OUTPUT:-$results_root_arg/AGRF_samplesheet_with_results.tsv}
 review_output_dir=${REVIEW_OUTPUT_DIR:-$results_root_arg/mlst_review_standalone}
 post_review_map_output=${POST_REVIEW_MAP_OUTPUT:-$results_root_arg/AGRF_samplesheet_with_results_post_review.tsv}
+results_workbook_output=${RESULTS_WORKBOOK_OUTPUT:-$results_root_arg/$(basename "$results_root_arg")_results.xlsx}
 log_file=${LOG_FILE:-$results_root_arg/submit_agar_full_pipeline_$(date '+%Y%m%d_%H%M%S').log}
 
 submit_script=${SUBMIT_PIPELINE_SCRIPT:-$script_dir/submit_bactopia_batch_pipeline.sh}
@@ -133,6 +137,9 @@ validate_script=${VALIDATE_FOFN_SCRIPT:-$script_dir/validate_bactopia_fofn.sh}
 map_pbs_script=${MAP_PBS_SCRIPT:-$script_dir/run_map_agrf_samplesheet_results.pbs}
 map_r_script=${MAP_R_SCRIPT:-$script_dir/map_agrf_samplesheet_results.R}
 review_mlst_pbs_script=${REVIEW_MLST_PBS_SCRIPT:-$script_dir/run_review_mlst_from_tsv.pbs}
+export_results_workbook_pbs_script=${EXPORT_RESULTS_WORKBOOK_PBS_SCRIPT:-$script_dir/run_export_bactopia_results_workbook.pbs}
+export_results_workbook_python_bin=${EXPORT_RESULTS_WORKBOOK_PYTHON_BIN:-python3}
+export_results_workbook_script=${EXPORT_RESULTS_WORKBOOK_SCRIPT:-$script_dir/export_bactopia_results_workbook.py}
 current_step="initialization"
 
 mkdir -p "$(dirname "$log_file")"
@@ -184,7 +191,7 @@ if ! [[ $batch_size =~ ^[1-9][0-9]*$ ]]; then
   fail "BATCH_SIZE must be a positive integer: $batch_size"
 fi
 
-for path in "$submit_script" "$normalize_script" "$validate_script" "$map_pbs_script" "$map_r_script" "$review_mlst_pbs_script"; do
+for path in "$submit_script" "$normalize_script" "$validate_script" "$map_pbs_script" "$map_r_script" "$review_mlst_pbs_script" "$export_results_workbook_pbs_script" "$export_results_workbook_script"; do
   if [[ ! -f $path ]]; then
     fail "Required script not found: $path"
   fi
@@ -274,6 +281,7 @@ map_qsub_output=$(
 )
 map_job_id=${map_qsub_output%%.*}
 log "INFO" "AGRF mapping job ${map_job_id}: ${map_output}"
+final_dependency_job=$map_job_id
 
 if [[ $run_mlst_review == 1 ]]; then
   current_step="submitting MLST review job"
@@ -286,6 +294,7 @@ if [[ $run_mlst_review == 1 ]]; then
   )
   review_job_id=${review_qsub_output%%.*}
   log "INFO" "MLST review job ${review_job_id}: ${review_tsv}"
+  final_dependency_job=$review_job_id
 
   if [[ $run_post_review_map == 1 ]]; then
     current_step="submitting post-review AGRF mapping job"
@@ -298,7 +307,20 @@ if [[ $run_mlst_review == 1 ]]; then
     )
     post_review_map_job_id=${post_review_map_qsub_output%%.*}
     log "INFO" "Post-review AGRF mapping job ${post_review_map_job_id}: ${post_review_map_output}"
+    final_dependency_job=$post_review_map_job_id
   fi
+fi
+
+if [[ $run_export_results_workbook == 1 ]]; then
+  current_step="submitting results workbook export job"
+  workbook_qsub_output=$(
+    qsub -N results_xlsx_job \
+      -W "depend=afterok:${final_dependency_job}" \
+      -v "RESULTS_ROOT=${RESULTS_ROOT},CONSOLIDATED_DIR=${consolidated_outdir},WORKBOOK_OUTPUT=${results_workbook_output},EXPORT_SCRIPT=${export_results_workbook_script},PYTHON_BIN=${export_results_workbook_python_bin}" \
+      "$export_results_workbook_pbs_script"
+  )
+  workbook_job_id=${workbook_qsub_output%%.*}
+  log "INFO" "Results workbook job ${workbook_job_id}: ${results_workbook_output}"
 fi
 
 log "INFO" "Pipeline submission completed successfully."

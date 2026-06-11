@@ -105,7 +105,7 @@ def main() -> int:
     used_names: set[str] = set()
 
     mapped_path = choose_mapped_results(results_root)
-    add_sheet(workbook, used_names, "agrf_results", read_table(mapped_path))
+    add_sheet(workbook, used_names, "AGRF_samplesheet_mapped", read_table(mapped_path))
 
     for top_level in ("project_summary.tsv", "tool_processing_log.tsv"):
         path = consolidated_dir / top_level

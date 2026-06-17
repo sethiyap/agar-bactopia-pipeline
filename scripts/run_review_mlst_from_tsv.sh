@@ -304,14 +304,39 @@ write_reviewed_agrf_table() {
     FNR == 1 {
       for (i = 1; i <= NF; i++) {
         if ($i == "Sample name") sample_name_col = i
+        if ($i == "mlst_scheme") mlst_scheme_col = i
+        if ($i == "mlst_st") mlst_st_col = i
+        if ($i == "mlst_profile") mlst_profile_col = i
       }
-      print $0, "resolved_scheme", "resolved_st", "resolved_profile", "resolution_note", "warning_score"
+      print $0, "mlst_review_note"
       next
     }
 
     {
       sample = (sample_name_col ? $sample_name_col : "")
-      print $0, resolved_scheme[sample], resolved_st[sample], resolved_profile[sample], resolution_note[sample], warning_score[sample]
+      if (mlst_scheme_col && resolved_scheme[sample] != "") {
+        $mlst_scheme_col = resolved_scheme[sample]
+      }
+      if (mlst_st_col && resolved_st[sample] != "") {
+        $mlst_st_col = resolved_st[sample]
+      }
+      if (mlst_profile_col && resolved_profile[sample] != "") {
+        $mlst_profile_col = resolved_profile[sample]
+      }
+      review_note = ""
+      if (resolved_scheme[sample] != "" || resolved_st[sample] != "" || resolved_profile[sample] != "") {
+        review_note = "Resolved using standalone MLST"
+        if (resolution_note[sample] != "") {
+          review_note = review_note " (" resolution_note[sample]
+          if (warning_score[sample] != "") {
+            review_note = review_note ", warning_score=" warning_score[sample]
+          }
+          review_note = review_note ")"
+        } else if (warning_score[sample] != "") {
+          review_note = review_note " (warning_score=" warning_score[sample] ")"
+        }
+      }
+      print $0, review_note
     }
   ' "$review_tsv" "$input_tsv" > "$output_tsv"
 }

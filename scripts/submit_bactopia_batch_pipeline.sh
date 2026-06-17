@@ -41,6 +41,7 @@ Environment variables:
   CONSOLIDATED_OUTDIR     Default: <results_root>/<batch_prefix>_consolidated
   BASE_DIR                Default: repo root above this script
   SAMPLESHEET_DIR         Override batch sheet directory used by run_bactopia_batch.pbs
+  PBS_LOG_DIR             Optional directory for qsub .o/.e files
 
 Example:
   BATCH_SKIP=0 \
@@ -113,6 +114,13 @@ BACTOPIA_PIPELINE=${BACTOPIA_PIPELINE:-}
 DATASETS_CACHE=${DATASETS_CACHE:-}
 SING_CACHE=${SING_CACHE:-}
 KLEBORATE_COMPAT_SCRIPT=${KLEBORATE_COMPAT_SCRIPT:-$script_dir/kleborate_232_compat.sh}
+PBS_LOG_DIR=${PBS_LOG_DIR:-}
+
+qsub_log_args=()
+if [[ -n $PBS_LOG_DIR ]]; then
+  mkdir -p "$PBS_LOG_DIR"
+  qsub_log_args=(-o "$PBS_LOG_DIR" -e "$PBS_LOG_DIR")
+fi
 
 if [[ ! -f $input_file ]]; then
   echo "Input file not found: $input_file" >&2
@@ -223,6 +231,10 @@ for batch_file in "${selected_batch_files[@]}"; do
     -N "$assembly_job_name"
   )
 
+  if [[ ${#qsub_log_args[@]} -gt 0 ]]; then
+    assembly_qsub_args+=("${qsub_log_args[@]}")
+  fi
+
   if [[ $BATCH_CHAIN == 1 && -n "$previous_batch_terminal_job" ]]; then
     assembly_qsub_args+=(-W "depend=afterok:${previous_batch_terminal_job}")
   fi
@@ -242,7 +254,7 @@ for batch_file in "${selected_batch_files[@]}"; do
   kleborate_job=
 
   if [[ $RUN_TOOLS != 0 ]]; then
-    tools_job=$(qsub -N "$tools_job_name" \
+    tools_job=$(qsub "${qsub_log_args[@]}" -N "$tools_job_name" \
       -W "depend=afterok:${assembly_job}" \
       -v "BASE_DIR=${BASE_DIR},RESULTS_MAIN=${results_main},RUN_LABEL=${run_label}_tools,RESULTS_OUT=${tools_outdir},RESULTS_ROOT=${RESULTS_ROOT},TOOLS_STRING=${TOOLS_STRING},KRAKEN2_DB=${KRAKEN2_DB},MYKROBE_SPECIES=${MYKROBE_SPECIES},DEFENSEFINDER_DB=${DEFENSEFINDER_DB},NEXTFLOW_CONFIG=${NEXTFLOW_CONFIG},BACTOPIA_PIPELINE=${BACTOPIA_PIPELINE},DATASETS_CACHE=${DATASETS_CACHE},SING_CACHE=${SING_CACHE}" \
       "$script_dir/run_extra_bactopia_tools.pbs")
@@ -251,7 +263,7 @@ for batch_file in "${selected_batch_files[@]}"; do
   fi
 
   if [[ $RUN_KLEBORATE != 0 ]]; then
-    kleborate_job=$(qsub -N "$kleborate_job_name" \
+    kleborate_job=$(qsub "${qsub_log_args[@]}" -N "$kleborate_job_name" \
       -W "depend=afterok:${assembly_job}" \
       -v "BASE_DIR=${BASE_DIR},RESULTS_MAIN=${results_main},RUN_LABEL=${run_label}_kleborate,RESULTS_OUT=${kleborate_outdir},RESULTS_ROOT=${RESULTS_ROOT},NEXTFLOW_CONFIG=${NEXTFLOW_CONFIG},BACTOPIA_PIPELINE=${BACTOPIA_PIPELINE},DATASETS_CACHE=${DATASETS_CACHE},SING_CACHE=${SING_CACHE},KLEBORATE_COMPAT_SCRIPT=${KLEBORATE_COMPAT_SCRIPT}" \
       "$script_dir/run_kleborate_batch.pbs")
@@ -292,7 +304,7 @@ for batch_file in "${selected_batch_files[@]}"; do
   fi
 
   if [[ $RUN_FIMTYPER != 0 ]]; then
-    fimtyper_job=$(qsub -N "$fimtyper_job_name" \
+    fimtyper_job=$(qsub "${qsub_log_args[@]}" -N "$fimtyper_job_name" \
       -W "depend=afterok:${dependency_job}" \
       -v "BASE_DIR=${BASE_DIR},RESULTS_MAIN=${results_main},RUN_LABEL=${run_label}_fimtyper,RESULTS_OUT=${fimtyper_outdir},RESULTS_ROOT=${RESULTS_ROOT},FIMTYPER_PIPELINE=${FIMTYPER_PIPELINE},FIMTYPER_CONFIG=${FIMTYPER_CONFIG},MERGE_FIMTYPER_SCRIPT=${MERGE_FIMTYPER_SCRIPT},FIMTYPER_PROFILE=${FIMTYPER_PROFILE},SING_CACHE=${SING_CACHE}" \
       "$script_dir/run_fimtyper_batch.pbs")
@@ -307,7 +319,7 @@ done
 
 if [[ $RUN_COLLECT_ASSEMBLIES != 0 && ${#assembly_jobs[@]} -gt 0 ]]; then
   dependency_string=$(IFS=:; echo "${assembly_jobs[*]}")
-  assemblies_job=$(qsub -W "depend=afterok:${dependency_string}" \
+  assemblies_job=$(qsub "${qsub_log_args[@]}" -W "depend=afterok:${dependency_string}" \
     -v "INPUT_PATH=${RESULTS_ROOT},OUTPUT_DIR=${ASSEMBLIES_OUTDIR}" \
     "$script_dir/run_fetch_batch_assemblies.pbs")
   assemblies_job=${assemblies_job%%.*}
@@ -316,7 +328,7 @@ fi
 
 if [[ $RUN_CONSOLIDATE != 0 && ${#terminal_jobs[@]} -gt 0 ]]; then
   dependency_string=$(IFS=:; echo "${terminal_jobs[*]}")
-  consolidate_job=$(qsub -W "depend=afterok:${dependency_string}" \
+  consolidate_job=$(qsub "${qsub_log_args[@]}" -W "depend=afterok:${dependency_string}" \
     -v "BASE_DIR=${BASE_DIR},RESULTS_ROOT=${RESULTS_ROOT},BATCH_PREFIX=${BATCH_PREFIX},CONSOLIDATED_OUTDIR=${CONSOLIDATED_OUTDIR},CONSOLIDATE_SCRIPT=${script_dir}/consolidate_bactopia_batches.R" \
     "$script_dir/run_consolidate_batches.pbs")
   consolidate_job=${consolidate_job%%.*}

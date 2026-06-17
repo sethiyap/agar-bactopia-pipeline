@@ -260,10 +260,38 @@ prefix_non_key_cols <- function(dat, prefix) {
 }
 
 read_agrf_sheet <- function(path) {
+  required_cols <- c(
+    "Sample name",
+    "Concentration (ng/ul)",
+    "A260:280",
+    "A260:230",
+    "Volume  (ul)",
+    "Comments"
+  )
   dat <- read_table_flex(path)
-  if (!"Sample name" %in% names(dat)) {
-    stop("AGRF sheet must contain a 'Sample name' column.", call. = FALSE)
+
+  if (anyDuplicated(names(dat))) {
+    dupes <- unique(names(dat)[duplicated(names(dat))])
+    stop(
+      "AGRF sheet contains duplicated column names: ",
+      paste(dupes, collapse = ", "),
+      call. = FALSE
+    )
   }
+
+  missing_cols <- setdiff(required_cols, names(dat))
+  if (length(missing_cols)) {
+    stop(
+      "AGRF sheet must contain exactly these required columns: ",
+      paste(required_cols, collapse = ", "),
+      ". Missing: ",
+      paste(missing_cols, collapse = ", "),
+      call. = FALSE
+    )
+  }
+
+  dat <- dat[required_cols]
+  dat[["Comments"]] <- as.character(dat[["Comments"]])
   dat$sample <- normalize_sample(dat[["Sample name"]])
   dat
 }
@@ -308,25 +336,32 @@ read_mlst_table <- function(path) {
     if ("sequence_type" %in% names(dat) && !"st" %in% names(dat)) {
       names(dat)[names(dat) == "sequence_type"] <- "st"
     }
+    review_meta_cols <- c("warning", "warnings", "note", "notes", "comment", "comments")
     locus_cols <- setdiff(
       names(dat),
       c(
         "sample", "scheme", "st", "profile", "batch_name", "source_file",
         "auto_scheme", "auto_st", "auto_profile",
         "resolved_scheme", "resolved_st", "resolved_profile",
-        "resolution_note", "warning_score", "agrf_comments", "source_assembly"
+        "resolution_note", "warning_score", "agrf_comments", "source_assembly",
+        review_meta_cols
       )
     )
-    if (length(locus_cols)) {
-      dat$profile <- apply(dat[locus_cols], 1L, function(row) {
-        vals <- trimws(as.character(row))
-        vals <- vals[nzchar(vals) & !is.na(vals)]
-        paste(vals, collapse = " ")
-      })
+    if (!"profile" %in% names(dat)) {
+      if (length(locus_cols)) {
+        dat$profile <- apply(dat[locus_cols], 1L, function(row) {
+          vals <- trimws(as.character(row))
+          vals <- vals[nzchar(vals) & !is.na(vals)]
+          paste(vals, collapse = " ")
+        })
+      } else {
+        dat$profile <- NA_character_
+      }
     } else {
-      dat$profile <- NA_character_
+      dat$profile <- trimws(as.character(dat$profile))
+      dat$profile[!nzchar(dat$profile)] <- NA_character_
     }
-    extra_review_cols <- intersect(c("warning", "warnings", "note", "notes", "comment", "comments"), names(dat))
+    extra_review_cols <- intersect(review_meta_cols, names(dat))
     keep <- unique(c("sample", intersect(c("scheme", "st", "profile"), names(dat)), extra_review_cols))
     dat <- dat[keep]
     if (!nrow(dat)) {

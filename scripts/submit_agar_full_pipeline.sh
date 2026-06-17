@@ -38,17 +38,22 @@ Environment variables:
   CREATE_FOFN_SCRIPT     Default: <script_dir>/2_create_fofn_bactopia.sh
   CREATE_FOFN_COMMAND    Optional shell command template to create the FOFN
                          Supported placeholders: {RAWDATA_DIR} {METADATA_DIR} {SAMPLESHEET_OUT}
+  IS_AGAR_PROJECT        Default: auto. Set to 1 to force AGAR filename normalization,
+                         0 to skip it for non-AGAR projects
   SKIP_NORMALIZE         Set to 1 to skip FASTQ name normalization
   SKIP_VALIDATE          Set to 1 to skip FOFN validation
   MAP_AGRF_RESULTS       Default: 1. Set to 0 to skip post-consolidation AGRF mapping
   RUN_MLST_REVIEW        Default: 1. Set to 0 to skip the standalone MLST review follow-up
-  RUN_POST_REVIEW_MAP    Default: 1 when RUN_MLST_REVIEW=1. Set to 0 to skip final AGRF remapping with reviewed MLST calls
+  RUN_POST_REVIEW_MAP    Default: 0. Set to 1 only if you explicitly want a
+                         second AGRF remap driven by mlst_review.tsv
   RUN_EXPORT_RESULTS_WORKBOOK Default: 1. Set to 0 to skip final Excel workbook export
   MAP_OUTPUT             Default: <RESULTS_ROOT>/AGRF_samplesheet_with_results.tsv
   REVIEW_OUTPUT_DIR      Default: <RESULTS_ROOT>/mlst_review_standalone
   POST_REVIEW_MAP_OUTPUT Default: <RESULTS_ROOT>/AGRF_samplesheet_with_results_post_review.tsv
+  LOG_DIR                Default: dirname(LOG_FILE) or <RESULTS_ROOT>
   RESULTS_WORKBOOK_OUTPUT Default: <RESULTS_ROOT>/<basename(RESULTS_ROOT)>_results.xlsx
   LOG_FILE               Default: <RESULTS_ROOT>/submit_agar_full_pipeline_<timestamp>.log
+  PBS_LOG_DIR            Optional directory for all qsub .o/.e files
 
 All environment variables used by submit_bactopia_batch_pipeline.sh are also honored,
 for example RESULTS_ROOT, NEXTFLOW_CONFIG, DATASETS_CACHE, RUN_TOOLS, RUN_KLEBORATE,
@@ -123,13 +128,20 @@ skip_normalize=${SKIP_NORMALIZE:-0}
 skip_validate=${SKIP_VALIDATE:-0}
 map_agrf_results=${MAP_AGRF_RESULTS:-1}
 run_mlst_review=${RUN_MLST_REVIEW:-1}
-run_post_review_map=${RUN_POST_REVIEW_MAP:-1}
+run_post_review_map=${RUN_POST_REVIEW_MAP:-0}
 run_export_results_workbook=${RUN_EXPORT_RESULTS_WORKBOOK:-1}
 map_output=${MAP_OUTPUT:-$results_root_arg/AGRF_samplesheet_with_results.tsv}
 review_output_dir=${REVIEW_OUTPUT_DIR:-$results_root_arg/mlst_review_standalone}
 post_review_map_output=${POST_REVIEW_MAP_OUTPUT:-$results_root_arg/AGRF_samplesheet_with_results_post_review.tsv}
 results_workbook_output=${RESULTS_WORKBOOK_OUTPUT:-$results_root_arg/$(basename "$results_root_arg")_results.xlsx}
-log_file=${LOG_FILE:-$results_root_arg/submit_agar_full_pipeline_$(date '+%Y%m%d_%H%M%S').log}
+log_dir=${LOG_DIR:-}
+if [[ -n ${LOG_FILE:-} ]]; then
+  log_file=$LOG_FILE
+elif [[ -n $log_dir ]]; then
+  log_file=${log_dir%/}/submit_agar_full_pipeline_$(date '+%Y%m%d_%H%M%S').log
+else
+  log_file=$results_root_arg/submit_agar_full_pipeline_$(date '+%Y%m%d_%H%M%S').log
+fi
 
 submit_script=${SUBMIT_PIPELINE_SCRIPT:-$script_dir/submit_bactopia_batch_pipeline.sh}
 normalize_script=${NORMALIZE_SCRIPT:-$script_dir/normalize_agar_fastq_sample_names.sh}
@@ -140,6 +152,7 @@ review_mlst_pbs_script=${REVIEW_MLST_PBS_SCRIPT:-$script_dir/run_review_mlst_fro
 export_results_workbook_pbs_script=${EXPORT_RESULTS_WORKBOOK_PBS_SCRIPT:-$script_dir/run_export_bactopia_results_workbook.pbs}
 export_results_workbook_python_bin=${EXPORT_RESULTS_WORKBOOK_PYTHON_BIN:-python3}
 export_results_workbook_script=${EXPORT_RESULTS_WORKBOOK_SCRIPT:-$script_dir/export_bactopia_results_workbook.py}
+is_agar_project=${IS_AGAR_PROJECT:-auto}
 current_step="initialization"
 
 mkdir -p "$(dirname "$log_file")"
@@ -161,6 +174,36 @@ on_error() {
 }
 
 trap on_error ERR
+
+resolve_is_agar_project() {
+  local setting="${1:-auto}"
+
+  case "${setting,,}" in
+    1|true|yes|y|agar)
+      return 0
+      ;;
+    0|false|no|n|other|non-agar|non_agar)
+      return 1
+      ;;
+    auto|"")
+      ;;
+    *)
+      fail "IS_AGAR_PROJECT must be one of: auto, 1, 0, true, false, agar, other"
+      ;;
+  esac
+
+  local candidate=""
+  for candidate in "$raw_fastq_dir" "$metadata_dir" "$results_root_arg" "${agrf_sheet_path:-}"; do
+    [[ -z $candidate ]] && continue
+    case "/$candidate/" in
+      */AGAR/*|*/PRJ-AGAR/*|*/AGRF_*/*|*/agar_samplesheet.txt/*)
+        return 0
+        ;;
+    esac
+  done
+
+  return 1
+}
 
 if [[ -z $agrf_sheet_path ]]; then
   if [[ -f $metadata_dir/AGRF_samplesheet.txt ]]; then
@@ -210,10 +253,22 @@ if [[ ! -f $agrf_sheet_path ]]; then
 fi
 log "INFO" "Detected AGRF samplesheet: $agrf_sheet_path"
 
-if [[ $skip_normalize != 1 ]]; then
+if resolve_is_agar_project "$is_agar_project"; then
+  is_agar_project=1
+  log "INFO" "Project detection: AGAR. FASTQ filename normalization is enabled."
+else
+  is_agar_project=0
+  log "INFO" "Project detection: non-AGAR. FASTQ filename normalization will be skipped."
+fi
+
+if [[ $skip_normalize != 1 && $is_agar_project == 1 ]]; then
   current_step="normalizing FASTQ sample names"
   log "INFO" "Normalizing FASTQ sample names in: $raw_fastq_dir"
   "$normalize_script" "$raw_fastq_dir"
+elif [[ $skip_normalize == 1 ]]; then
+  log "INFO" "Skipping FASTQ sample name normalization because SKIP_NORMALIZE=1"
+else
+  log "INFO" "Skipping FASTQ sample name normalization for non-AGAR project input"
 fi
 
 if [[ -n $create_fofn_command ]]; then
@@ -247,6 +302,13 @@ mkdir -p "$batch_dir"
 export RESULTS_ROOT=${RESULTS_ROOT:-$results_root_arg}
 export BATCH_DIR="$batch_dir"
 export BATCH_PREFIX="$batch_prefix"
+export PBS_LOG_DIR=${PBS_LOG_DIR:-}
+
+top_level_qsub_log_args=()
+if [[ -n ${PBS_LOG_DIR:-} ]]; then
+  mkdir -p "$PBS_LOG_DIR"
+  top_level_qsub_log_args=(-o "$PBS_LOG_DIR" -e "$PBS_LOG_DIR")
+fi
 
 current_step="submitting batch workflow"
 log "INFO" "Submitting batch workflow from: $run_agar_dir"
@@ -274,7 +336,7 @@ fi
 consolidated_outdir=${CONSOLIDATED_OUTDIR:-${RESULTS_ROOT}/${BATCH_PREFIX}_consolidated}
 current_step="submitting AGRF mapping job"
 map_qsub_output=$(
-  qsub -N agrf_map_job \
+  qsub "${top_level_qsub_log_args[@]}" -N agrf_map_job \
     -W "depend=afterok:${consolidate_job_id}" \
     -v "AGRF_SHEET=${agrf_sheet_path},CONSOLIDATED_DIR=${consolidated_outdir},MAP_OUTPUT=${map_output},MAP_SCRIPT=${map_r_script}" \
     "$map_pbs_script"
@@ -287,7 +349,7 @@ if [[ $run_mlst_review == 1 ]]; then
   current_step="submitting MLST review job"
   review_tsv=${map_output%.tsv}_review_required.tsv
   review_qsub_output=$(
-    qsub -N mlst_review_job \
+    qsub "${top_level_qsub_log_args[@]}" -N mlst_review_job \
       -W "depend=afterok:${map_job_id}" \
       -v "REVIEW_TSV=${review_tsv},RESULTS_ROOT=${RESULTS_ROOT},MAPPED_TSV=${map_output},OUTPUT_DIR=${review_output_dir},RUN_AGAR_ROOT=${run_agar_dir}" \
       "$review_mlst_pbs_script"
@@ -300,7 +362,7 @@ if [[ $run_mlst_review == 1 ]]; then
     current_step="submitting post-review AGRF mapping job"
     review_mlst_file=${review_output_dir}/mlst_review.tsv
     post_review_map_qsub_output=$(
-      qsub -N agrf_post_review_map_job \
+      qsub "${top_level_qsub_log_args[@]}" -N agrf_post_review_map_job \
         -W "depend=afterok:${review_job_id}" \
         -v "AGRF_SHEET=${agrf_sheet_path},CONSOLIDATED_DIR=${consolidated_outdir},MAP_OUTPUT=${post_review_map_output},MAP_SCRIPT=${map_r_script},MLST_FILE=${review_mlst_file}" \
         "$map_pbs_script"
@@ -314,7 +376,7 @@ fi
 if [[ $run_export_results_workbook == 1 ]]; then
   current_step="submitting results workbook export job"
   workbook_qsub_output=$(
-    qsub -N results_xlsx_job \
+    qsub "${top_level_qsub_log_args[@]}" -N results_xlsx_job \
       -W "depend=afterok:${final_dependency_job}" \
       -v "RESULTS_ROOT=${RESULTS_ROOT},CONSOLIDATED_DIR=${consolidated_outdir},WORKBOOK_OUTPUT=${results_workbook_output},EXPORT_SCRIPT=${export_results_workbook_script},PYTHON_BIN=${export_results_workbook_python_bin}" \
       "$export_results_workbook_pbs_script"

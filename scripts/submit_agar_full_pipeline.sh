@@ -53,6 +53,11 @@ Environment variables:
   RUN_POST_REVIEW_MAP    Default: 0. Set to 1 only if you explicitly want a
                          second AGRF remap driven by mlst_review.tsv
   RUN_EXPORT_RESULTS_WORKBOOK Default: 1. Set to 0 to skip final Excel workbook export
+  CHECK_INODE_QUOTA      Default: 1. Set to 0 to skip the inode preflight check
+  INODE_FS_MIN_FREE_COUNT Default: 50000. Fail early if df reports fewer free inodes
+  INODE_FS_MIN_FREE_PCT  Default: 5. Fail early if df reports less free inode percent
+  PROJECT_INODE_MAX_USE_PCT Default: 95. Fail early if lquota/nci_account reports
+                         scratch inode usage at or above this percent
   MAP_OUTPUT             Default: <RESULTS_ROOT>/AGRF_samplesheet_with_results.tsv
   REVIEW_OUTPUT_DIR      Default: <RESULTS_ROOT>/mlst_review_standalone
   POST_REVIEW_MAP_OUTPUT Default: <RESULTS_ROOT>/AGRF_samplesheet_with_results_post_review.tsv
@@ -165,6 +170,10 @@ export_results_workbook_pbs_script=${EXPORT_RESULTS_WORKBOOK_PBS_SCRIPT:-$script
 export_results_workbook_python_bin=${EXPORT_RESULTS_WORKBOOK_PYTHON_BIN:-python3}
 export_results_workbook_script=${EXPORT_RESULTS_WORKBOOK_SCRIPT:-$script_dir/export_bactopia_results_workbook.py}
 is_agar_project=${IS_AGAR_PROJECT:-auto}
+check_inode_quota=${CHECK_INODE_QUOTA:-1}
+inode_fs_min_free_count=${INODE_FS_MIN_FREE_COUNT:-50000}
+inode_fs_min_free_pct=${INODE_FS_MIN_FREE_PCT:-5}
+project_inode_max_use_pct=${PROJECT_INODE_MAX_USE_PCT:-95}
 current_step="initialization"
 
 mkdir -p "$(dirname "$log_file")"
@@ -241,6 +250,230 @@ find_metadata_sheet() {
   return 1
 }
 
+find_existing_parent() {
+  local path=$1
+
+  while [[ ! -e $path && $path != "/" ]]; do
+    path=$(dirname "$path")
+  done
+
+  printf '%s\n' "$path"
+}
+
+extract_scratch_project() {
+  local path=$1
+
+  if [[ $path =~ ^/scratch/([^/]+)/ ]]; then
+    printf '%s\n' "${BASH_REMATCH[1]}"
+  fi
+}
+
+check_filesystem_inode_headroom() {
+  local target_path=$1
+  local existing_path df_line df_ifree df_use_pct free_pct
+  local _df_filesystem _df_inodes _df_iused _df_mount
+
+  existing_path=$(find_existing_parent "$target_path")
+  if [[ ! -e $existing_path ]]; then
+    log "WARN" "Skipping filesystem inode preflight because no existing parent was found for: $target_path"
+    return 0
+  fi
+
+  df_line=$(df -Pi "$existing_path" 2>/dev/null | awk 'NR == 2 {print}')
+  if [[ -z $df_line ]]; then
+    log "WARN" "Skipping filesystem inode preflight because df -Pi returned no output for: $existing_path"
+    return 0
+  fi
+
+  read -r _df_filesystem _df_inodes _df_iused df_ifree df_use_pct _df_mount <<<"$df_line"
+  if [[ -z ${_df_mount:-} ]]; then
+    log "WARN" "Skipping filesystem inode preflight because df -Pi output could not be parsed for: $existing_path"
+    return 0
+  fi
+
+  df_use_pct=${df_use_pct%\%}
+  if ! [[ $df_ifree =~ ^[0-9]+$ && $df_use_pct =~ ^[0-9]+$ ]]; then
+    log "WARN" "Skipping filesystem inode preflight because inode values were not numeric for: $existing_path"
+    return 0
+  fi
+
+  free_pct=$((100 - df_use_pct))
+  log "INFO" "Filesystem inode preflight for $existing_path: ${df_ifree} free inodes (${free_pct}% free)"
+
+  if (( df_ifree < inode_fs_min_free_count || free_pct < inode_fs_min_free_pct )); then
+    fail "Not enough filesystem inode headroom under $existing_path: ${df_ifree} free inodes (${free_pct}% free). Adjust RESULTS_ROOT, clean scratch, or override INODE_FS_MIN_FREE_COUNT / INODE_FS_MIN_FREE_PCT."
+  fi
+}
+
+parse_scaled_count() {
+  local value=$1
+  local unit=${2:-}
+
+  unit=${unit//\*/}
+  awk -v value="$value" -v unit="$unit" '
+    BEGIN {
+      mult = 1
+      if (unit == "K") {
+        mult = 1000
+      } else if (unit == "M") {
+        mult = 1000000
+      } else if (unit == "G") {
+        mult = 1000000000
+      } else if (unit == "T") {
+        mult = 1000000000000
+      }
+      printf "%.0f\n", value * mult
+    }
+  '
+}
+
+check_quota_text_report() {
+  local source=$1
+  local report=$2
+  local project=$3
+  local relevant max_pct pct scratch_row iusage iquota iuse_pct
+  local nci_scratch_row nci_iused_value nci_iused_unit nci_ialloc_value nci_ialloc_unit
+
+  if grep -Eqi "Project[[:space:]]+${project}[[:space:]]+is over storage allocation on gadi-scratch1" <<<"$report"; then
+    fail "Scratch quota preflight failed for project ${project}: ${source} reports the project is over storage allocation on gadi-scratch1. Clean scratch inodes before rerunning."
+  fi
+
+  scratch_row=$(printf '%s\n' "$report" | awk -v proj="$project" '$1 == proj && $2 == "scratch" {print; exit}')
+  if [[ -n $scratch_row ]]; then
+    if grep -Eqi 'Over[[:space:]]+inode[[:space:]]+limit' <<<"$scratch_row"; then
+      fail "Scratch quota preflight failed for project ${project}: ${source} reports the scratch allocation is over inode limit."
+    fi
+
+    read -r iusage iquota < <(printf '%s\n' "$scratch_row" | awk '{print $9, $10}')
+    if [[ $iusage =~ ^[0-9]+$ && $iquota =~ ^[0-9]+$ && $iquota -gt 0 ]]; then
+      iuse_pct=$(( (iusage * 100) / iquota ))
+      log "INFO" "${source} inode preflight for project ${project}: scratch inode usage ${iusage}/${iquota} (${iuse_pct}%)"
+      if (( iuse_pct >= project_inode_max_use_pct )); then
+        fail "Scratch inode usage for project ${project} is ${iuse_pct}% according to ${source} (${iusage}/${iquota}). Clean scratch or raise PROJECT_INODE_MAX_USE_PCT if this threshold is intentionally higher."
+      fi
+      return 0
+    fi
+  fi
+
+  nci_scratch_row=$(printf '%s\n' "$report" | awk '$1 ~ /^scratch[0-9]*$/ {print; exit}')
+  if [[ -n $nci_scratch_row ]]; then
+    if grep -Eqi 'Over[[:space:]]+inode[[:space:]]+quota|Over[[:space:]]+inode[[:space:]]+limit' <<<"$nci_scratch_row"; then
+      fail "Scratch quota preflight failed for project ${project}: ${source} reports the scratch allocation is over inode quota."
+    fi
+
+    read -r nci_iused_value nci_iused_unit nci_ialloc_value nci_ialloc_unit < <(printf '%s\n' "$nci_scratch_row" | awk '{print $4, $5, $8, $9}')
+    if [[ -n ${nci_iused_value:-} && -n ${nci_iused_unit:-} && -n ${nci_ialloc_value:-} && -n ${nci_ialloc_unit:-} ]]; then
+      iusage=$(parse_scaled_count "$nci_iused_value" "$nci_iused_unit")
+      iquota=$(parse_scaled_count "$nci_ialloc_value" "$nci_ialloc_unit")
+      if [[ $iusage =~ ^[0-9]+$ && $iquota =~ ^[0-9]+$ && $iquota -gt 0 ]]; then
+        iuse_pct=$(( (iusage * 100) / iquota ))
+        log "INFO" "${source} inode preflight for project ${project}: scratch inode usage ${iusage}/${iquota} (${iuse_pct}%)"
+        if (( iuse_pct >= project_inode_max_use_pct )); then
+          fail "Scratch inode usage for project ${project} is ${iuse_pct}% according to ${source} (${iusage}/${iquota}). Clean scratch or raise PROJECT_INODE_MAX_USE_PCT if this threshold is intentionally higher."
+        fi
+        return 0
+      fi
+    fi
+  fi
+
+  relevant=$(printf '%s\n' "$report" | grep -Ei "scratch.*inode|inode.*scratch|/scratch/${project}|${project}[[:space:]]+scratch" || true)
+  [[ -z $relevant ]] && return 1
+
+  max_pct=""
+  while IFS= read -r pct; do
+    pct=${pct%\%}
+    [[ -z $pct ]] && continue
+    if [[ -z $max_pct || $pct -gt $max_pct ]]; then
+      max_pct=$pct
+    fi
+  done < <(printf '%s\n' "$relevant" | grep -Eo '[0-9]{1,3}%' || true)
+
+  if [[ -n $max_pct ]]; then
+    log "INFO" "${source} inode preflight for project ${project}: parsed scratch inode usage up to ${max_pct}%"
+    if (( max_pct >= project_inode_max_use_pct )); then
+      fail "Scratch inode usage for project ${project} is ${max_pct}% according to ${source}. Clean scratch or raise PROJECT_INODE_MAX_USE_PCT if this threshold is intentionally higher."
+    fi
+    return 0
+  fi
+
+  return 1
+}
+
+check_project_inode_quota() {
+  local target_path=$1
+  local project=$2
+  local quota_output quota_status
+
+  if [[ $check_inode_quota != 1 ]]; then
+    log "INFO" "Skipping project inode quota preflight because CHECK_INODE_QUOTA=0"
+    return 0
+  fi
+
+  if [[ -z $project ]]; then
+    log "INFO" "Skipping project inode quota preflight because RESULTS_ROOT is not under /scratch: $target_path"
+    return 0
+  fi
+
+  if command -v lquota >/dev/null 2>&1; then
+    quota_status=0
+    quota_output=$(lquota 2>&1) || quota_status=$?
+    if check_quota_text_report "lquota" "$quota_output" "$project"; then
+      return 0
+    fi
+    if (( quota_status != 0 )); then
+      log "WARN" "lquota exited with status ${quota_status}. Falling back to nci_account if available."
+    else
+      log "WARN" "Could not parse scratch inode usage for project ${project} from lquota output."
+    fi
+  fi
+
+  if command -v nci_account >/dev/null 2>&1; then
+    quota_status=0
+    quota_output=$(nci_account -P "$project" 2>&1) || quota_status=$?
+    if check_quota_text_report "nci_account -P ${project}" "$quota_output" "$project"; then
+      return 0
+    fi
+    if (( quota_status != 0 )); then
+      log "WARN" "nci_account -P ${project} exited with status ${quota_status}. Continuing without a parsed project inode quota result."
+    else
+      log "WARN" "Could not parse scratch inode usage for project ${project} from nci_account -P ${project} output."
+    fi
+    return 0
+  fi
+
+  log "WARN" "Neither lquota nor nci_account is available, so scratch project inode quota could not be checked."
+}
+
+run_inode_preflight() {
+  local scratch_project=""
+
+  case "${check_inode_quota}" in
+    0)
+      log "INFO" "Skipping inode preflight because CHECK_INODE_QUOTA=0"
+      return 0
+      ;;
+    1) ;;
+    *)
+      fail "CHECK_INODE_QUOTA must be 0 or 1: $check_inode_quota"
+      ;;
+  esac
+
+  if ! [[ $inode_fs_min_free_count =~ ^[0-9]+$ ]]; then
+    fail "INODE_FS_MIN_FREE_COUNT must be a non-negative integer: $inode_fs_min_free_count"
+  fi
+  if ! [[ $inode_fs_min_free_pct =~ ^[0-9]+$ ]] || (( inode_fs_min_free_pct > 100 )); then
+    fail "INODE_FS_MIN_FREE_PCT must be an integer between 0 and 100: $inode_fs_min_free_pct"
+  fi
+  if ! [[ $project_inode_max_use_pct =~ ^[0-9]+$ ]] || (( project_inode_max_use_pct < 1 || project_inode_max_use_pct > 100 )); then
+    fail "PROJECT_INODE_MAX_USE_PCT must be an integer between 1 and 100: $project_inode_max_use_pct"
+  fi
+
+  log "INFO" "Running inode preflight for RESULTS_ROOT: $results_root_arg"
+  check_filesystem_inode_headroom "$results_root_arg"
+  scratch_project=$(extract_scratch_project "$results_root_arg" || true)
+  check_project_inode_quota "$results_root_arg" "$scratch_project"
+}
+
 if [[ -z $agrf_sheet_path ]]; then
   if ! agrf_sheet_path=$(find_metadata_sheet "$metadata_dir"); then
     agrf_sheet_path=$metadata_dir/metadata_samplesheet.txt
@@ -304,6 +537,9 @@ else
   is_agar_project=0
   log "INFO" "Project detection: non-AGAR. FASTQ filename normalization will be skipped."
 fi
+
+current_step="checking inode headroom"
+run_inode_preflight
 
 if [[ $postprocess_only == 1 ]]; then
   log "INFO" "Skipping FASTQ sample name normalization in POSTPROCESS_ONLY mode"
@@ -427,7 +663,7 @@ if [[ $run_mlst_review == 1 ]]; then
     review_qsub_args+=(-W "depend=afterok:${final_dependency_job}")
   fi
   review_qsub_args+=(
-    -v "REVIEW_TSV=${review_tsv},RESULTS_ROOT=${RESULTS_ROOT},MAPPED_TSV=${map_output},OUTPUT_DIR=${review_output_dir},RUN_AGAR_ROOT=${run_agar_dir}"
+    -v "REVIEW_TSV=${review_tsv},RESULTS_ROOT=${RESULTS_ROOT},MAPPED_TSV=${map_output},OUTPUT_DIR=${review_output_dir},RUN_AGAR_ROOT=${run_agar_dir},MINIFORGE_ROOT=${MINIFORGE_ROOT:-},MLST_ENV=${MLST_ENV:-}"
     "$review_mlst_pbs_script"
   )
   review_qsub_output=$(qsub "${review_qsub_args[@]}")

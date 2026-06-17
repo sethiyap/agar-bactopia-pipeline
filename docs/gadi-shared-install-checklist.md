@@ -12,7 +12,9 @@ Recommended shared locations:
   agar-bactopia-pipeline/
   bactopia/
   bactopia/kraken_indices/
-  ps1744/bactopia_datasets_custom/
+  bactopia_datasets/bactopia_datasets_custom/
+  bactopia_datasets/miniforge3/
+  bactopia_datasets/envs/mlst_env/
 ```
 
 Optional shared external references:
@@ -49,6 +51,36 @@ These are required runtime dependencies and should be available on Gadi:
 - optional Miniforge/Conda MLST review environment
 - Python with `openpyxl` for final workbook export
 
+## Shared Miniforge
+
+If the MLST review environment should be usable by multiple people, do not keep
+Miniforge under one user's home directory. Put it in a shared group-readable
+location such as:
+
+```text
+/g/data/rg42/bactopia_datasets/miniforge3
+```
+
+Recommended pattern:
+
+- install Miniforge in a shared `/g/data` directory owned by the lab/project group
+- keep the parent directories group-traversable
+- use setgid on the shared directory so new files keep the project group
+- create the review environment in a shared path as well, for example
+  `/g/data/rg42/bactopia_datasets/envs/mlst_env`
+- point `MINIFORGE_ROOT` at the shared Miniforge install and `MLST_ENV` at the
+  shared environment name or full environment path
+
+Typical permission target for shared directories:
+
+```text
+drwxr-sr-x
+```
+
+That gives the owner read/write/execute, and gives group members read/execute
+plus setgid inheritance for new files. If multiple people need to update the
+shared Conda installation itself, the directory must also be group-writable.
+
 ## Gadi Setup Steps
 
 1. Clone the repo into the shared Gadi location.
@@ -70,6 +102,8 @@ vi config/sites/gadi.local.env
 - `BACTOPIA_PIPELINE`
 - `DATASETS_CACHE`
 - `KRAKEN2_DB`
+- `MINIFORGE_ROOT`
+- `MLST_ENV`
 - `NEXTFLOW_CONFIG`
 - `KLEBORATE_COMPAT_SCRIPT`
 - `FIMTYPER_PIPELINE`

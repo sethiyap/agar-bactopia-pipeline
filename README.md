@@ -266,10 +266,26 @@ review. The exporter prefers
 `AGRF_samplesheet_with_results_mlst_reviewed.tsv` when present and otherwise
 falls back to `AGRF_samplesheet_with_results.tsv`.
 
-If the batch outputs already exist and you only want to rerun consolidation,
-metadata mapping, MLST review, and workbook export, use:
+Common examples:
 
 ```bash
+# test one batch
+BATCH_IDS=005 BATCH_LIMIT=1 \
+./bin/agar-bactopia submit gadi \
+  /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
+  /scratch/rg42/AGAR/metadata/2025/B07 \
+  /scratch/rg42/AGAR/intermediates/2025/B07 \
+  50
+
+# start from batch 3
+BATCH_START=3 BATCH_LIMIT=2 \
+./bin/agar-bactopia submit gadi \
+  /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
+  /scratch/rg42/AGAR/metadata/2025/B07 \
+  /scratch/rg42/AGAR/intermediates/2025/B07 \
+  50
+
+# postprocess only: consolidate + review + workbook export
 POSTPROCESS_ONLY=1 \
 RUN_CONSOLIDATE=1 \
 RUN_MLST_REVIEW=1 \
@@ -284,6 +300,16 @@ RUN_EXPORT_RESULTS_WORKBOOK=1 \
 In `POSTPROCESS_ONLY=1` mode, the trailing `50` does not limit the work to 50
 samples. Consolidation runs across all batch directories already present under
 the selected `RESULTS_ROOT`.
+
+The launcher now runs an inode preflight against `RESULTS_ROOT` before
+submission. On Gadi scratch it checks filesystem inode headroom and also looks
+for project scratch quota issues via `lquota` or `nci_account`. Set
+`CHECK_INODE_QUOTA=0` to skip it, or tune `INODE_FS_MIN_FREE_COUNT`,
+`INODE_FS_MIN_FREE_PCT`, and `PROJECT_INODE_MAX_USE_PCT`.
+An inode limit is a file-count limit, not a size limit, so you can hit it even
+when there is still disk space left. If this check fails on Gadi, clean up old
+batch result folders, `work/` directories, and other no-longer-needed files
+under your project scratch area such as `/scratch/rg42/...`.
 
 For retry work on a specific batch or subset, the batch submitter accepts:
 

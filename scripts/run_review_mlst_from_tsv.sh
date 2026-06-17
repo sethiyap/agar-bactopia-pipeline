@@ -13,8 +13,8 @@ Usage:
     [--output-dir /scratch/rg42/AGAR/intermediates/2025/B05/mlst_review_standalone]
 
 Optional environment variables:
-  MINIFORGE_ROOT   Default: /home/562/<user>/miniforge3
-  MLST_ENV         Default: mlst_env
+  MINIFORGE_ROOT   Default: /g/data/rg42/bactopia_datasets/miniforge3
+  MLST_ENV         Default: /g/data/rg42/bactopia_datasets/envs/mlst_env
   MLST_SCHEME      Optional: force a scheme, e.g. ecoli_achtman_4
 EOF
 }
@@ -94,8 +94,8 @@ reviewed_output_from_mapped() {
   printf '%s/%s_mlst_reviewed.tsv\n' "$dir_name" "$stub"
 }
 
-MINIFORGE_ROOT=${MINIFORGE_ROOT:-/home/562/${USER:-$USER}/miniforge3}
-MLST_ENV=${MLST_ENV:-mlst_env}
+MINIFORGE_ROOT=${MINIFORGE_ROOT:-/g/data/rg42/bactopia_datasets/miniforge3}
+MLST_ENV=${MLST_ENV:-/g/data/rg42/bactopia_datasets/envs/mlst_env}
 if [[ -z $OUTPUT_DIR ]]; then
   OUTPUT_DIR="${RESULTS_ROOT}/mlst_review_standalone"
 fi

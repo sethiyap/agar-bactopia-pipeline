@@ -81,6 +81,26 @@ That gives the owner read/write/execute, and gives group members read/execute
 plus setgid inheritance for new files. If multiple people need to update the
 shared Conda installation itself, the directory must also be group-writable.
 
+For a shared writable MLST environment, use a group-writable setgid directory
+instead, for example:
+
+```text
+drwxrwsr-x
+```
+
+Typical commands for the shared review environment:
+
+```bash
+chgrp -R rg42 /g/data/rg42/bactopia_datasets/envs/mlst_env
+chmod -R g+rwX /g/data/rg42/bactopia_datasets/envs/mlst_env
+find /g/data/rg42/bactopia_datasets/envs/mlst_env -type d -exec chmod g+s {} +
+chmod 2775 /g/data/rg42/bactopia_datasets/envs
+```
+
+That keeps the environment writable by project group members and makes new
+files/directories inherit group `rg42`. When updating the shared environment,
+use `umask 0002` so new files stay group-writable.
+
 ## Gadi Setup Steps
 
 1. Clone the repo into the shared Gadi location.

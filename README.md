@@ -281,6 +281,10 @@ RUN_EXPORT_RESULTS_WORKBOOK=1 \
   50
 ```
 
+In `POSTPROCESS_ONLY=1` mode, the trailing `50` does not limit the work to 50
+samples. Consolidation runs across all batch directories already present under
+the selected `RESULTS_ROOT`.
+
 For retry work on a specific batch or subset, the batch submitter accepts:
 
 - `BATCH_START` for a 1-based starting batch number

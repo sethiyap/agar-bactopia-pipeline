@@ -6,7 +6,7 @@ usage <- function() {
   cat(
     "Usage:\n",
     "  Rscript scripts/map_agrf_samplesheet_results.R",
-    " --agrf-sheet <AGRF_samplesheet.txt>",
+    " --agrf-sheet <metadata_samplesheet.txt>",
     " --consolidated-dir <dir>",
     " --output <file.tsv>\n",
     "\n",
@@ -19,7 +19,8 @@ usage <- function() {
     "  --bracken <file>\n",
     "\n",
     "Notes:\n",
-    "  - AGRF sheet is expected to contain a 'Sample name' column.\n",
+    "  - Metadata sheet must contain 'Sample name' and 'Comments' columns.\n",
+    "  - All other metadata columns are ignored by this script.\n",
     "  - If explicit result files are not provided, the script tries to locate\n",
     "    consolidated tool tables under --consolidated-dir.\n",
     sep = ""
@@ -60,7 +61,7 @@ plasmidfinder_file <- opts[["plasmidfinder"]]
 bracken_file <- opts[["bracken"]]
 
 if (is.null(agrf_sheet) || !file.exists(agrf_sheet)) {
-  stop("`--agrf-sheet` must point to an existing AGRF samplesheet.", call. = FALSE)
+  stop("`--agrf-sheet` must point to an existing metadata samplesheet.", call. = FALSE)
 }
 
 if (is.null(consolidated_dir) || !dir.exists(consolidated_dir)) {
@@ -262,10 +263,6 @@ prefix_non_key_cols <- function(dat, prefix) {
 read_agrf_sheet <- function(path) {
   required_cols <- c(
     "Sample name",
-    "Concentration (ng/ul)",
-    "A260:280",
-    "A260:230",
-    "Volume  (ul)",
     "Comments"
   )
   dat <- read_table_flex(path)
@@ -273,7 +270,7 @@ read_agrf_sheet <- function(path) {
   if (anyDuplicated(names(dat))) {
     dupes <- unique(names(dat)[duplicated(names(dat))])
     stop(
-      "AGRF sheet contains duplicated column names: ",
+      "Metadata sheet contains duplicated column names: ",
       paste(dupes, collapse = ", "),
       call. = FALSE
     )
@@ -282,7 +279,7 @@ read_agrf_sheet <- function(path) {
   missing_cols <- setdiff(required_cols, names(dat))
   if (length(missing_cols)) {
     stop(
-      "AGRF sheet must contain exactly these required columns: ",
+      "Metadata sheet must contain exactly these required columns: ",
       paste(required_cols, collapse = ", "),
       ". Missing: ",
       paste(missing_cols, collapse = ", "),

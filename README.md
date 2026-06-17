@@ -200,6 +200,23 @@ cp config/sites/gadi.env.example config/sites/gadi.local.env
   50
 ```
 
+## Metadata Sheet Requirements
+
+The submit wrapper expects exactly one metadata sheet matching
+`*_samplesheet.txt` under `METADATA_DIR`, unless you set `AGRF_SHEET_PATH`
+explicitly.
+
+Required metadata columns:
+
+- `Sample name`: sample identifier used to join metadata back onto the
+  consolidated Bactopia outputs
+- `Comments`: free-text phenotype or lab note field used by the MLST review
+  logic
+
+All other metadata columns are ignored by the metadata-mapping step. They may
+still be kept in your source sheet for lab bookkeeping, but they are not
+required for downstream processing by this pipeline.
+
 ## MLST Review And Discrepancy Resolution
 
 The pipeline includes a review-driven standalone MLST follow-up for flagged
@@ -237,6 +254,59 @@ Outputs:
 The final Excel workbook export prefers
 `AGRF_samplesheet_with_results_mlst_reviewed.tsv` when present; otherwise it
 falls back to `AGRF_samplesheet_with_results.tsv`.
+
+## First Workbook Sheet Columns
+
+The first sheet in the Excel workbook is still named `AGRF_samplesheet_mapped`
+for backward compatibility, but it is now a generic metadata-mapped results
+sheet derived from your `*_samplesheet.txt` file.
+
+Always-present metadata columns:
+
+- `Sample name`: sample identifier from the metadata sheet
+- `Comments`: phenotype label or free-text lab note from the metadata sheet
+
+Optional result columns added when the corresponding tool outputs exist:
+
+- `mlst_scheme`: MLST scheme assigned to the sample
+- `mlst_st`: MLST sequence type
+- `mlst_profile`: MLST allele profile summary
+- `kleborate_species`: species call from Kleborate
+- `kleborate_species_match`: whether the Kleborate species agrees with the
+  metadata phenotype/genus expectation
+- `kleborate_st`: Kleborate sequence type when reported
+- `kleborate_virulence_score`: Kleborate virulence score
+- `kleborate_resistance_score`: Kleborate resistance score
+- `kleborate_k_locus`: Klebsiella K locus call
+- `kleborate_k_type`: Klebsiella capsule type derived from the K locus
+- `kleborate_o_locus`: Klebsiella O locus call
+- `kleborate_o_type`: Klebsiella O antigen type derived from the O locus
+- `fimtyper_fimtype`: FimTyper fimbrial type call
+- `fimtyper_identity`: identity score or percent identity reported by FimTyper
+- `abritamr_beta_lactam`: beta-lactam resistance summary from abritAMR
+- `abritamr_esbl`: ESBL resistance summary from abritAMR
+- `abritamr_carbapenemase`: carbapenemase resistance summary from abritAMR
+- `abritamr_quinolone`: quinolone resistance summary from abritAMR
+- `abritamr_sulfonamide`: sulfonamide resistance summary from abritAMR
+- `plasmidfinder_replicon`: plasmid replicon summary from PlasmidFinder
+- `plasmidfinder_plasmid`: plasmid call or summary from PlasmidFinder
+- `bracken_primary_species`: top Bracken species assignment
+- `bracken_primary_species_abundance`: abundance for the top Bracken species
+- `bracken_secondary_species`: second-ranked Bracken species assignment
+- `bracken_secondary_species_abundance`: abundance for the second-ranked Bracken species
+- `bracken_unclassified_abundance`: Bracken abundance assigned as unclassified
+
+Review columns:
+
+- `review_required`: `yes` when the MLST result needs manual or standalone
+  review, otherwise `no`
+- `review_reason`: explanation for why the sample was flagged
+- `mlst_review_note`: present in the reviewed workbook sheet; explains how the
+  standalone MLST review resolved, or failed to resolve, the flagged sample
+
+If a reviewed table is available, the workbook exporter writes the resolved
+standalone MLST values back into `mlst_scheme`, `mlst_st`, and `mlst_profile`
+before creating sheet 1.
 
 ## Layout
 

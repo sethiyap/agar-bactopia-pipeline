@@ -20,11 +20,13 @@ What this script does:
   2. Create the Bactopia FOFN/samplesheet if requested
   3. Validate the FOFN
   4. Submit the batch workflow
-  5. Submit AGRF result mapping after consolidation completes
+  5. Submit metadata-sheet result mapping after consolidation completes
 
 Inputs:
   RAW_FASTQ_DIR  Raw FASTQ directory, for example /scratch/rg42/AGAR/rawdata/2025/B05
-  METADATA_DIR   Metadata directory containing AGRF_samplesheet.txt and/or samplesheet.fofn
+  METADATA_DIR   Metadata directory containing *_samplesheet.txt and/or samplesheet.fofn
+                 The metadata sheet must contain 'Sample name' and 'Comments'.
+                 Other metadata columns are ignored by downstream metadata mapping.
   RESULTS_ROOT   Intermediate results directory, for example /scratch/rg42/AGAR/intermediates/2025/B05
   BATCH_SIZE     Default: 50
 
@@ -32,7 +34,7 @@ Environment variables:
   PIPELINE_CONFIG        Optional shell env file to source before resolving defaults
   RUN_AGAR_DIR           Default: directory above this script
   SAMPLESHEET_PATH       Default: <METADATA_DIR>/samplesheet.fofn
-  AGRF_SHEET_PATH        Default: <METADATA_DIR>/AGRF_samplesheet.txt, fallback: <METADATA_DIR>/agar_samplesheet.txt
+  AGRF_SHEET_PATH        Optional explicit metadata sheet path. Default: first <METADATA_DIR>/*_samplesheet.txt match
   BATCH_PREFIX           Default: agar_batch
   BATCH_DIR              Default: <METADATA_DIR>/batches
   CREATE_FOFN_SCRIPT     Default: <script_dir>/2_create_fofn_bactopia.sh
@@ -205,13 +207,33 @@ resolve_is_agar_project() {
   return 1
 }
 
+find_metadata_sheet() {
+  local dir=$1
+  local matches=()
+  local candidate=""
+
+  shopt -s nullglob
+  for candidate in "$dir"/*_samplesheet.txt; do
+    [[ -f $candidate ]] || continue
+    matches+=("$candidate")
+  done
+  shopt -u nullglob
+
+  if [[ ${#matches[@]} -eq 1 ]]; then
+    printf '%s\n' "${matches[0]}"
+    return 0
+  fi
+
+  if [[ ${#matches[@]} -gt 1 ]]; then
+    fail "Multiple metadata samplesheets found in $dir: ${matches[*]}. Keep exactly one *_samplesheet.txt or set AGRF_SHEET_PATH explicitly."
+  fi
+
+  return 1
+}
+
 if [[ -z $agrf_sheet_path ]]; then
-  if [[ -f $metadata_dir/AGRF_samplesheet.txt ]]; then
-    agrf_sheet_path=$metadata_dir/AGRF_samplesheet.txt
-  elif [[ -f $metadata_dir/agar_samplesheet.txt ]]; then
-    agrf_sheet_path=$metadata_dir/agar_samplesheet.txt
-  else
-    agrf_sheet_path=$metadata_dir/AGRF_samplesheet.txt
+  if ! agrf_sheet_path=$(find_metadata_sheet "$metadata_dir"); then
+    agrf_sheet_path=$metadata_dir/metadata_samplesheet.txt
   fi
 fi
 
@@ -220,7 +242,7 @@ log "INFO" "RAW_FASTQ_DIR=$raw_fastq_dir"
 log "INFO" "METADATA_DIR=$metadata_dir"
 log "INFO" "RESULTS_ROOT=$results_root_arg"
 log "INFO" "SAMPLESHEET_PATH=$samplesheet_path"
-log "INFO" "AGRF_SHEET_PATH=$agrf_sheet_path"
+log "INFO" "METADATA_SHEET_PATH=$agrf_sheet_path"
 
 if [[ ! -d $raw_fastq_dir ]]; then
   fail "RAW_FASTQ_DIR not found: $raw_fastq_dir"
@@ -249,9 +271,9 @@ log "INFO" "Detected $fastq_count FASTQ files in raw data directory"
 
 current_step="checking metadata inputs"
 if [[ ! -f $agrf_sheet_path ]]; then
-  fail "AGRF samplesheet not found in metadata directory. Expected $metadata_dir/AGRF_samplesheet.txt or $metadata_dir/agar_samplesheet.txt"
+  fail "Metadata samplesheet not found in metadata directory. Expected exactly one $metadata_dir/*_samplesheet.txt file or set AGRF_SHEET_PATH explicitly."
 fi
-log "INFO" "Detected AGRF samplesheet: $agrf_sheet_path"
+log "INFO" "Detected metadata samplesheet: $agrf_sheet_path"
 
 if resolve_is_agar_project "$is_agar_project"; then
   is_agar_project=1

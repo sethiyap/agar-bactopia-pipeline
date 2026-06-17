@@ -14,10 +14,10 @@ set -euo pipefail
 PROJECT=${PROJECT:-rg42}
 USER_NAME=${USER_NAME:-$USER}
 # Example B05 submission:
-# qsub -v "RESULTS_ROOT=/scratch/<project>/<user>/run_001,BATCH_PREFIX=agar_batch,CONSOLIDATED_OUTDIR=/scratch/<project>/<user>/run_001/agar_batch_consolidated,CONSOLIDATE_SCRIPT=/path/to/consolidate_bactopia_batches.R" scripts/run_consolidate_batches.pbs
+# qsub -v "RESULTS_ROOT=/scratch/<project>/<user>/run_001,BATCH_PREFIX=batch_bactopia,CONSOLIDATED_OUTDIR=/scratch/<project>/<user>/run_001/batch_bactopia_consolidated,CONSOLIDATE_SCRIPT=/path/to/consolidate_bactopia_batches.R" scripts/run_consolidate_batches.pbs
 
 RESULTS_ROOT=${RESULTS_ROOT:-/scratch/${PROJECT}/${USER_NAME}/bactopia_results}
-BATCH_PREFIX=${BATCH_PREFIX:-agar_batch}
+BATCH_PREFIX=${BATCH_PREFIX:-batch_bactopia}
 CONSOLIDATED_OUTDIR=${CONSOLIDATED_OUTDIR:-${RESULTS_ROOT}/${BATCH_PREFIX}_consolidated}
 CONSOLIDATE_SCRIPT=${CONSOLIDATE_SCRIPT:-${BASE_DIR:-$PWD}/scripts/consolidate_bactopia_batches.R}
 

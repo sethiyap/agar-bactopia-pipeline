@@ -16,7 +16,7 @@ set -euo pipefail
 # Edit the variables in the "User settings" section before submitting with qsub.
 #
 # Example:
-#   qsub -v RESULTS_MAIN=/path/to/results_main,RUN_LABEL=agar_batch_001_tools scripts/run_extra_bactopia_tools.pbs
+#   qsub -v RESULTS_MAIN=/path/to/results_main,RUN_LABEL=batch_bactopia_001_tools scripts/run_extra_bactopia_tools.pbs
 
 ###############################################################################
 # User settings

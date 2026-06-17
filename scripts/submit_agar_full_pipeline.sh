@@ -35,15 +35,19 @@ Environment variables:
   RUN_AGAR_DIR           Default: directory above this script
   SAMPLESHEET_PATH       Default: <METADATA_DIR>/samplesheet.fofn
   AGRF_SHEET_PATH        Optional explicit metadata sheet path. Default: first <METADATA_DIR>/*_samplesheet.txt match
-  BATCH_PREFIX           Default: agar_batch
+  BATCH_PREFIX           Default: batch_bactopia
   BATCH_DIR              Default: <METADATA_DIR>/batches
   CREATE_FOFN_SCRIPT     Default: <script_dir>/2_create_fofn_bactopia.sh
   CREATE_FOFN_COMMAND    Optional shell command template to create the FOFN
                          Supported placeholders: {RAWDATA_DIR} {METADATA_DIR} {SAMPLESHEET_OUT}
   IS_AGAR_PROJECT        Default: auto. Set to 1 to force AGAR filename normalization,
                          0 to skip it for non-AGAR projects
+  POSTPROCESS_ONLY       Default: 0. Set to 1 to skip FASTQ and batch submission
+                         and only run consolidation, mapping, review, and workbook export
   SKIP_NORMALIZE         Set to 1 to skip FASTQ name normalization
   SKIP_VALIDATE          Set to 1 to skip FOFN validation
+  RUN_CONSOLIDATE        Default: 1. Set to 0 in POSTPROCESS_ONLY mode to reuse
+                         an existing consolidated directory
   MAP_AGRF_RESULTS       Default: 1. Set to 0 to skip post-consolidation AGRF mapping
   RUN_MLST_REVIEW        Default: 1. Set to 0 to skip the standalone MLST review follow-up
   RUN_POST_REVIEW_MAP    Default: 0. Set to 1 only if you explicitly want a
@@ -52,16 +56,18 @@ Environment variables:
   MAP_OUTPUT             Default: <RESULTS_ROOT>/AGRF_samplesheet_with_results.tsv
   REVIEW_OUTPUT_DIR      Default: <RESULTS_ROOT>/mlst_review_standalone
   POST_REVIEW_MAP_OUTPUT Default: <RESULTS_ROOT>/AGRF_samplesheet_with_results_post_review.tsv
-  LOG_DIR                Default: dirname(LOG_FILE) or <RESULTS_ROOT>
   RESULTS_WORKBOOK_OUTPUT Default: <RESULTS_ROOT>/<basename(RESULTS_ROOT)>_results.xlsx
+  LOG_DIR                Default: dirname(LOG_FILE) or <RESULTS_ROOT>
   LOG_FILE               Default: <RESULTS_ROOT>/submit_agar_full_pipeline_<timestamp>.log
   PBS_LOG_DIR            Optional directory for all qsub .o/.e files
+  CONSOLIDATE_PBS_SCRIPT Default: <script_dir>/run_consolidate_batches.pbs
+  CONSOLIDATE_SCRIPT     Default: <script_dir>/consolidate_bactopia_batches.R
 
 All environment variables used by submit_bactopia_batch_pipeline.sh are also honored,
 for example RESULTS_ROOT, NEXTFLOW_CONFIG, DATASETS_CACHE, RUN_TOOLS, RUN_KLEBORATE,
 RUN_ADDITIONAL_TOOLS, TOOLS_STRING, RUN_FIMTYPER, FIMTYPER_PIPELINE,
 FIMTYPER_CONFIG, RUN_COLLECT_ASSEMBLIES, ASSEMBLIES_OUTDIR, BATCH_SKIP,
-BATCH_LIMIT, BATCH_CHAIN.
+BATCH_START, BATCH_LIMIT, BATCH_CHAIN, BATCH_IDS.
 EOF
 }
 
@@ -122,12 +128,14 @@ run_agar_dir=${RUN_AGAR_DIR:-$(cd "$script_dir/.." && pwd)}
 
 samplesheet_path=${SAMPLESHEET_PATH:-$metadata_dir/samplesheet.fofn}
 agrf_sheet_path=${AGRF_SHEET_PATH:-}
-batch_prefix=${BATCH_PREFIX:-agar_batch}
+batch_prefix=${BATCH_PREFIX:-batch_bactopia}
 batch_dir=${BATCH_DIR:-$metadata_dir/batches}
 create_fofn_command=${CREATE_FOFN_COMMAND:-}
 create_fofn_script=${CREATE_FOFN_SCRIPT:-$script_dir/2_create_fofn_bactopia.sh}
+postprocess_only=${POSTPROCESS_ONLY:-0}
 skip_normalize=${SKIP_NORMALIZE:-0}
 skip_validate=${SKIP_VALIDATE:-0}
+run_consolidate=${RUN_CONSOLIDATE:-1}
 map_agrf_results=${MAP_AGRF_RESULTS:-1}
 run_mlst_review=${RUN_MLST_REVIEW:-1}
 run_post_review_map=${RUN_POST_REVIEW_MAP:-0}
@@ -148,6 +156,8 @@ fi
 submit_script=${SUBMIT_PIPELINE_SCRIPT:-$script_dir/submit_bactopia_batch_pipeline.sh}
 normalize_script=${NORMALIZE_SCRIPT:-$script_dir/normalize_agar_fastq_sample_names.sh}
 validate_script=${VALIDATE_FOFN_SCRIPT:-$script_dir/validate_bactopia_fofn.sh}
+consolidate_pbs_script=${CONSOLIDATE_PBS_SCRIPT:-$script_dir/run_consolidate_batches.pbs}
+consolidate_r_script=${CONSOLIDATE_SCRIPT:-$script_dir/consolidate_bactopia_batches.R}
 map_pbs_script=${MAP_PBS_SCRIPT:-$script_dir/run_map_agrf_samplesheet_results.pbs}
 map_r_script=${MAP_R_SCRIPT:-$script_dir/map_agrf_samplesheet_results.R}
 review_mlst_pbs_script=${REVIEW_MLST_PBS_SCRIPT:-$script_dir/run_review_mlst_from_tsv.pbs}
@@ -256,18 +266,30 @@ if ! [[ $batch_size =~ ^[1-9][0-9]*$ ]]; then
   fail "BATCH_SIZE must be a positive integer: $batch_size"
 fi
 
-for path in "$submit_script" "$normalize_script" "$validate_script" "$map_pbs_script" "$map_r_script" "$review_mlst_pbs_script" "$export_results_workbook_pbs_script" "$export_results_workbook_script"; do
+for path in "$submit_script" "$normalize_script" "$validate_script" "$consolidate_pbs_script" "$consolidate_r_script" "$map_pbs_script" "$map_r_script" "$review_mlst_pbs_script"; do
   if [[ ! -f $path ]]; then
     fail "Required script not found: $path"
   fi
 done
 
-current_step="checking raw FASTQ inputs"
-fastq_count=$(find "$raw_fastq_dir" -maxdepth 1 -type f \( -name "*.fastq.gz" -o -name "*.fq.gz" \) | wc -l | tr -d ' ')
-if [[ $fastq_count -eq 0 ]]; then
-  fail "No FASTQ files were found in RAW_FASTQ_DIR: $raw_fastq_dir"
+if [[ $run_export_results_workbook == 1 ]]; then
+  for path in "$export_results_workbook_pbs_script" "$export_results_workbook_script"; do
+    if [[ ! -f $path ]]; then
+      fail "Required workbook export script not found: $path"
+    fi
+  done
 fi
-log "INFO" "Detected $fastq_count FASTQ files in raw data directory"
+
+if [[ $postprocess_only != 1 ]]; then
+  current_step="checking raw FASTQ inputs"
+  fastq_count=$(find "$raw_fastq_dir" -maxdepth 1 -type f \( -name "*.fastq.gz" -o -name "*.fq.gz" \) | wc -l | tr -d ' ')
+  if [[ $fastq_count -eq 0 ]]; then
+    fail "No FASTQ files were found in RAW_FASTQ_DIR: $raw_fastq_dir"
+  fi
+  log "INFO" "Detected $fastq_count FASTQ files in raw data directory"
+else
+  log "INFO" "POSTPROCESS_ONLY=1. FASTQ checks, FOFN creation, validation, and batch submission will be skipped."
+fi
 
 current_step="checking metadata inputs"
 if [[ ! -f $agrf_sheet_path ]]; then
@@ -283,7 +305,9 @@ else
   log "INFO" "Project detection: non-AGAR. FASTQ filename normalization will be skipped."
 fi
 
-if [[ $skip_normalize != 1 && $is_agar_project == 1 ]]; then
+if [[ $postprocess_only == 1 ]]; then
+  log "INFO" "Skipping FASTQ sample name normalization in POSTPROCESS_ONLY mode"
+elif [[ $skip_normalize != 1 && $is_agar_project == 1 ]]; then
   current_step="normalizing FASTQ sample names"
   log "INFO" "Normalizing FASTQ sample names in: $raw_fastq_dir"
   "$normalize_script" "$raw_fastq_dir"
@@ -293,7 +317,9 @@ else
   log "INFO" "Skipping FASTQ sample name normalization for non-AGAR project input"
 fi
 
-if [[ -n $create_fofn_command ]]; then
+if [[ $postprocess_only == 1 ]]; then
+  log "INFO" "Skipping FOFN creation and validation in POSTPROCESS_ONLY mode"
+elif [[ -n $create_fofn_command ]]; then
   current_step="creating Bactopia FOFN with CREATE_FOFN_COMMAND"
   mkdir -p "$(dirname "$samplesheet_path")"
   fofn_cmd=${create_fofn_command//\{RAWDATA_DIR\}/$raw_fastq_dir}
@@ -308,11 +334,11 @@ elif [[ ! -f $samplesheet_path && -f $create_fofn_script ]]; then
   "$create_fofn_script" "$raw_fastq_dir" "$samplesheet_path"
 fi
 
-if [[ ! -f $samplesheet_path ]]; then
+if [[ $postprocess_only != 1 && ! -f $samplesheet_path ]]; then
   fail "Samplesheet/FOFN not found: $samplesheet_path. Either create it first or provide CREATE_FOFN_COMMAND / CREATE_FOFN_SCRIPT."
 fi
 
-if [[ $skip_validate != 1 ]]; then
+if [[ $postprocess_only != 1 && $skip_validate != 1 ]]; then
   current_step="validating FOFN"
   log "INFO" "Validating FOFN: $samplesheet_path"
   "$validate_script" "$samplesheet_path"
@@ -332,57 +358,85 @@ if [[ -n ${PBS_LOG_DIR:-} ]]; then
   top_level_qsub_log_args=(-o "$PBS_LOG_DIR" -e "$PBS_LOG_DIR")
 fi
 
-current_step="submitting batch workflow"
-log "INFO" "Submitting batch workflow from: $run_agar_dir"
-submit_output=$(
-  cd "$run_agar_dir"
-  "$submit_script" "$samplesheet_path" "$batch_size"
-)
-printf '%s\n' "$submit_output"
+consolidated_outdir=${CONSOLIDATED_OUTDIR:-${RESULTS_ROOT}/${BATCH_PREFIX}_consolidated}
+consolidate_job_id=
 
-consolidate_job_id=$(
-  printf '%s\n' "$submit_output" |
-    awk '/^consolidation job / {gsub(":", "", $3); print $3}'
-)
+if [[ $postprocess_only == 1 ]]; then
+  if [[ $run_consolidate == 1 ]]; then
+    current_step="submitting consolidation-only workflow"
+    log "INFO" "Submitting consolidation-only job for existing batches under: $results_root_arg"
+    consolidate_qsub_output=$(
+      qsub "${top_level_qsub_log_args[@]}" \
+        -v "RESULTS_ROOT=${RESULTS_ROOT},BATCH_PREFIX=${BATCH_PREFIX},CONSOLIDATED_OUTDIR=${consolidated_outdir},CONSOLIDATE_SCRIPT=${consolidate_r_script}" \
+        "$consolidate_pbs_script"
+    )
+    consolidate_job_id=${consolidate_qsub_output%%.*}
+    log "INFO" "Consolidation job ${consolidate_job_id}: ${consolidated_outdir}"
+  else
+    if [[ ! -d $consolidated_outdir ]]; then
+      fail "POSTPROCESS_ONLY mode with RUN_CONSOLIDATE=0 requires an existing consolidated directory: $consolidated_outdir"
+    fi
+    log "INFO" "Using existing consolidated directory: $consolidated_outdir"
+  fi
+else
+  current_step="submitting batch workflow"
+  log "INFO" "Submitting batch workflow from: $run_agar_dir"
+  submit_output=$(
+    cd "$run_agar_dir"
+    "$submit_script" "$samplesheet_path" "$batch_size"
+  )
+  printf '%s\n' "$submit_output"
 
-if [[ $map_agrf_results != 1 ]]; then
-  log "INFO" "AGRF mapping disabled. Pipeline submission completed."
-  exit 0
+  consolidate_job_id=$(
+    printf '%s\n' "$submit_output" |
+      awk '/^consolidation job / {gsub(":", "", $3); print $3}'
+  )
 fi
 
-if [[ -z $consolidate_job_id ]]; then
+final_dependency_job=${consolidate_job_id:-}
+review_tsv=${map_output%.tsv}_review_required.tsv
+review_mlst_file=${review_output_dir}/mlst_review.tsv
+
+if [[ $map_agrf_results == 1 && -z $consolidate_job_id && $postprocess_only != 1 && $run_consolidate == 1 ]]; then
   log "WARN" "No consolidation job was detected, so AGRF mapping was not submitted."
   exit 0
-fi
-
-consolidated_outdir=${CONSOLIDATED_OUTDIR:-${RESULTS_ROOT}/${BATCH_PREFIX}_consolidated}
-current_step="submitting AGRF mapping job"
-map_qsub_output=$(
-  qsub "${top_level_qsub_log_args[@]}" -N agrf_map_job \
-    -W "depend=afterok:${consolidate_job_id}" \
-    -v "AGRF_SHEET=${agrf_sheet_path},CONSOLIDATED_DIR=${consolidated_outdir},MAP_OUTPUT=${map_output},MAP_SCRIPT=${map_r_script}" \
+elif [[ $map_agrf_results == 1 ]]; then
+  current_step="submitting AGRF mapping job"
+  map_qsub_args=("${top_level_qsub_log_args[@]}" -N agrf_map_job)
+  if [[ -n $final_dependency_job ]]; then
+    map_qsub_args+=(-W "depend=afterok:${final_dependency_job}")
+  fi
+  map_qsub_args+=(
+    -v "AGRF_SHEET=${agrf_sheet_path},CONSOLIDATED_DIR=${consolidated_outdir},MAP_OUTPUT=${map_output},MAP_SCRIPT=${map_r_script}"
     "$map_pbs_script"
-)
-map_job_id=${map_qsub_output%%.*}
-log "INFO" "AGRF mapping job ${map_job_id}: ${map_output}"
-final_dependency_job=$map_job_id
+  )
+  map_qsub_output=$(qsub "${map_qsub_args[@]}")
+  map_job_id=${map_qsub_output%%.*}
+  log "INFO" "AGRF mapping job ${map_job_id}: ${map_output}"
+  final_dependency_job=$map_job_id
+elif [[ $run_mlst_review == 1 ]]; then
+  if [[ ! -f $map_output || ! -f $review_tsv ]]; then
+    fail "RUN_MLST_REVIEW=1 with MAP_AGRF_RESULTS=0 requires existing files: $map_output and $review_tsv"
+  fi
+fi
 
 if [[ $run_mlst_review == 1 ]]; then
   current_step="submitting MLST review job"
-  review_tsv=${map_output%.tsv}_review_required.tsv
-  review_qsub_output=$(
-    qsub "${top_level_qsub_log_args[@]}" -N mlst_review_job \
-      -W "depend=afterok:${map_job_id}" \
-      -v "REVIEW_TSV=${review_tsv},RESULTS_ROOT=${RESULTS_ROOT},MAPPED_TSV=${map_output},OUTPUT_DIR=${review_output_dir},RUN_AGAR_ROOT=${run_agar_dir}" \
-      "$review_mlst_pbs_script"
+  review_qsub_args=("${top_level_qsub_log_args[@]}" -N mlst_review_job)
+  if [[ -n $final_dependency_job ]]; then
+    review_qsub_args+=(-W "depend=afterok:${final_dependency_job}")
+  fi
+  review_qsub_args+=(
+    -v "REVIEW_TSV=${review_tsv},RESULTS_ROOT=${RESULTS_ROOT},MAPPED_TSV=${map_output},OUTPUT_DIR=${review_output_dir},RUN_AGAR_ROOT=${run_agar_dir}"
+    "$review_mlst_pbs_script"
   )
+  review_qsub_output=$(qsub "${review_qsub_args[@]}")
   review_job_id=${review_qsub_output%%.*}
   log "INFO" "MLST review job ${review_job_id}: ${review_tsv}"
   final_dependency_job=$review_job_id
 
   if [[ $run_post_review_map == 1 ]]; then
     current_step="submitting post-review AGRF mapping job"
-    review_mlst_file=${review_output_dir}/mlst_review.tsv
     post_review_map_qsub_output=$(
       qsub "${top_level_qsub_log_args[@]}" -N agrf_post_review_map_job \
         -W "depend=afterok:${review_job_id}" \
@@ -393,16 +447,37 @@ if [[ $run_mlst_review == 1 ]]; then
     log "INFO" "Post-review AGRF mapping job ${post_review_map_job_id}: ${post_review_map_output}"
     final_dependency_job=$post_review_map_job_id
   fi
+elif [[ $run_post_review_map == 1 ]]; then
+  if [[ ! -f $review_mlst_file ]]; then
+    fail "RUN_POST_REVIEW_MAP=1 without RUN_MLST_REVIEW requires an existing review file: $review_mlst_file"
+  fi
+
+  current_step="submitting post-review AGRF mapping job"
+  post_review_map_qsub_args=("${top_level_qsub_log_args[@]}" -N agrf_post_review_map_job)
+  if [[ -n $final_dependency_job ]]; then
+    post_review_map_qsub_args+=(-W "depend=afterok:${final_dependency_job}")
+  fi
+  post_review_map_qsub_args+=(
+    -v "AGRF_SHEET=${agrf_sheet_path},CONSOLIDATED_DIR=${consolidated_outdir},MAP_OUTPUT=${post_review_map_output},MAP_SCRIPT=${map_r_script},MLST_FILE=${review_mlst_file}"
+    "$map_pbs_script"
+  )
+  post_review_map_qsub_output=$(qsub "${post_review_map_qsub_args[@]}")
+  post_review_map_job_id=${post_review_map_qsub_output%%.*}
+  log "INFO" "Post-review AGRF mapping job ${post_review_map_job_id}: ${post_review_map_output}"
+  final_dependency_job=$post_review_map_job_id
 fi
 
 if [[ $run_export_results_workbook == 1 ]]; then
   current_step="submitting results workbook export job"
-  workbook_qsub_output=$(
-    qsub "${top_level_qsub_log_args[@]}" -N results_xlsx_job \
-      -W "depend=afterok:${final_dependency_job}" \
-      -v "RESULTS_ROOT=${RESULTS_ROOT},CONSOLIDATED_DIR=${consolidated_outdir},WORKBOOK_OUTPUT=${results_workbook_output},EXPORT_SCRIPT=${export_results_workbook_script},PYTHON_BIN=${export_results_workbook_python_bin}" \
-      "$export_results_workbook_pbs_script"
+  workbook_qsub_args=("${top_level_qsub_log_args[@]}" -N results_xlsx_job)
+  if [[ -n $final_dependency_job ]]; then
+    workbook_qsub_args+=(-W "depend=afterok:${final_dependency_job}")
+  fi
+  workbook_qsub_args+=(
+    -v "RESULTS_ROOT=${RESULTS_ROOT},CONSOLIDATED_DIR=${consolidated_outdir},WORKBOOK_OUTPUT=${results_workbook_output},EXPORT_SCRIPT=${export_results_workbook_script},PYTHON_BIN=${export_results_workbook_python_bin}"
+    "$export_results_workbook_pbs_script"
   )
+  workbook_qsub_output=$(qsub "${workbook_qsub_args[@]}")
   workbook_job_id=${workbook_qsub_output%%.*}
   log "INFO" "Results workbook job ${workbook_job_id}: ${results_workbook_output}"
 fi

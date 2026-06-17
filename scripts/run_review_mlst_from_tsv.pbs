@@ -21,7 +21,7 @@ set -euo pipefail
 #     scripts/run_review_mlst_from_tsv.pbs
 #
 # Optional qsub variables:
-#   BATCH_PREFIX     Default: agar_batch
+#   BATCH_PREFIX     Default: batch_bactopia
 #   MAPPED_TSV       Default: <RESULTS_ROOT>/AGRF_samplesheet_with_results.tsv
 #   OUTPUT_DIR       Default: <RESULTS_ROOT>/mlst_review_standalone
 #   MINIFORGE_ROOT   Default: /home/562/<user>/miniforge3
@@ -29,7 +29,7 @@ set -euo pipefail
 #   MLST_SCHEME      Optional forced scheme, e.g. ecoli_achtman_4
 
 RESULTS_ROOT=${RESULTS_ROOT:-${PBS_O_WORKDIR:-$PWD}}
-BATCH_PREFIX=${BATCH_PREFIX:-agar_batch}
+BATCH_PREFIX=${BATCH_PREFIX:-batch_bactopia}
 REVIEW_TSV=${REVIEW_TSV:-${RESULTS_ROOT}/AGRF_samplesheet_with_results_review_required.tsv}
 MAPPED_TSV=${MAPPED_TSV:-${RESULTS_ROOT}/AGRF_samplesheet_with_results.tsv}
 OUTPUT_DIR=${OUTPUT_DIR:-${RESULTS_ROOT}/mlst_review_standalone}

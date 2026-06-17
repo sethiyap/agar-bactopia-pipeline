@@ -9,15 +9,15 @@ Usage:
 
 Examples:
   ./scripts/fetch_batch_assemblies.sh \
-    /scratch/rg42/AGAR/intermediates/2025/B05/agar_batch_001 \
-    /scratch/rg42/AGAR/intermediates/2025/B05/agar_batch_001_assemblies
+    /scratch/rg42/AGAR/intermediates/2025/B05/batch_bactopia_001 \
+    /scratch/rg42/AGAR/intermediates/2025/B05/batch_bactopia_001_assemblies
 
   ./scripts/fetch_batch_assemblies.sh \
-    /scratch/rg42/AGAR/intermediates/2025/B05/agar_batch_001/results_main \
+    /scratch/rg42/AGAR/intermediates/2025/B05/batch_bactopia_001/results_main \
     ./assemblies_batch_001
 
   ./scripts/fetch_batch_assemblies.sh \
-    /scratch/rg42/AGAR/intermediates/2025/B05/agar_batch_XX \
+    /scratch/rg42/AGAR/intermediates/2025/B05/batch_bactopia_XX \
     ./assemblies_all_batches
 
   ./scripts/fetch_batch_assemblies.sh \
@@ -34,9 +34,10 @@ What it does:
 Notes:
   - If the first argument ends with `results_main`, that directory is searched directly.
   - If it contains `XX`, that is treated as a wildcard matching batch numbers,
-    for example `agar_batch_XX` matches `agar_batch_001`, `agar_batch_002`, ...
+    for example `batch_bactopia_XX` matches `batch_bactopia_001`,
+    `batch_bactopia_002`, ...
   - Otherwise, if it is a parent directory, the script recursively searches for
-    `agar_batch*/results_main` beneath it.
+    `<batch_prefix>_NNN/results_main` beneath it.
 EOF
 }
 
@@ -47,6 +48,7 @@ fi
 
 input_path=$1
 output_dir=$2
+BATCH_PREFIX=${BATCH_PREFIX:-batch_bactopia}
 
 for cmd in find cp gunzip mkdir basename sort; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
@@ -91,12 +93,17 @@ resolve_results_main_dirs() {
     return
   fi
 
-  if [[ $(basename "$raw_input") == agar_batch* ]]; then
+  if [[ $(basename "$raw_input") =~ ^${BATCH_PREFIX}_[0-9]{3}$ ]]; then
     printf '%s\n' "$raw_input"
     return
   fi
 
-  find "$raw_input" -type d -path '*/agar_batch*/results_main' | sort
+  find "$raw_input" -type d -name 'results_main' | while IFS= read -r results_dir; do
+    parent_dir=$(basename "$(dirname "$results_dir")")
+    if [[ $parent_dir =~ ^${BATCH_PREFIX}_[0-9]{3}$ ]]; then
+      printf '%s\n' "$results_dir"
+    fi
+  done | sort
 }
 
 mapfile -t input_dirs < <(resolve_results_main_dirs "$input_path")

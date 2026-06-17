@@ -12,11 +12,11 @@ Example:
     metadata/agar_samplesheet.fofn \
     50 \
     metadata/batches \
-    agar_batch
+    batch_bactopia
 
 This writes:
-  metadata/batches/agar_batch_001.fofn
-  metadata/batches/agar_batch_002.fofn
+  metadata/batches/batch_bactopia_001.fofn
+  metadata/batches/batch_bactopia_002.fofn
   ...
 
 CSV samplesheets and tab-delimited Bactopia FOFN files are supported.

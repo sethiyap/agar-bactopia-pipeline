@@ -389,7 +389,7 @@ read_mlst_table <- function(path) {
   }
 
   is_batch_token <- function(x) {
-    grepl("^agar_batch_[0-9]+$", x)
+    grepl("^[[:alnum:]_]+_[0-9]{3}$", x)
   }
 
   is_path_token <- function(x) {

@@ -8,11 +8,14 @@ Usage:
   ./scripts/submit_bactopia_batch_pipeline.sh INPUT_FILE BATCH_SIZE
 
 Environment variables:
-  BATCH_PREFIX            Default: agar_batch
+  BATCH_PREFIX            Default: batch_bactopia
   BATCH_DIR               Default: <input_dir>/batches
   BATCH_SKIP              Default: 0
+  BATCH_START             Optional 1-based batch number to start from, e.g. 3
   BATCH_LIMIT             Default: 2
   BATCH_CHAIN             Default: 0
+  BATCH_IDS               Optional comma-separated batch ids or labels to run,
+                          for example 001 or batch_bactopia_001
   RUN_TOOLS               Default: 1
   RUN_ADDITIONAL_TOOLS    Default: 0
   DEFAULT_TOOLS_STRING    Default non-Kleborate tool list:
@@ -80,11 +83,13 @@ batch_size=$2
 
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
-BATCH_PREFIX=${BATCH_PREFIX:-agar_batch}
+BATCH_PREFIX=${BATCH_PREFIX:-batch_bactopia}
 BATCH_DIR=${BATCH_DIR:-$(dirname "$input_file")/batches}
 BATCH_SKIP=${BATCH_SKIP:-0}
+BATCH_START=${BATCH_START:-}
 BATCH_LIMIT=${BATCH_LIMIT:-2}
 BATCH_CHAIN=${BATCH_CHAIN:-0}
+BATCH_IDS=${BATCH_IDS:-}
 RUN_TOOLS=${RUN_TOOLS:-1}
 RUN_ADDITIONAL_TOOLS=${RUN_ADDITIONAL_TOOLS:-0}
 DEFAULT_TOOLS_STRING=${DEFAULT_TOOLS_STRING:-abritamr amrfinderplus bracken checkm mlst plasmidfinder}
@@ -137,6 +142,11 @@ if ! [[ $BATCH_SKIP =~ ^[0-9]+$ ]]; then
   exit 1
 fi
 
+if [[ -n $BATCH_START ]] && ! [[ $BATCH_START =~ ^[1-9][0-9]*$ ]]; then
+  echo "BATCH_START must be a positive integer batch number: $BATCH_START" >&2
+  exit 1
+fi
+
 if ! [[ $BATCH_LIMIT =~ ^[1-9][0-9]*$ ]]; then
   echo "BATCH_LIMIT must be a positive integer: $BATCH_LIMIT" >&2
   exit 1
@@ -154,6 +164,21 @@ fi
 
 if [[ ${RUN_COLLECT_ASSEMBLIES:-0} != 0 && ${RUN_COLLECT_ASSEMBLIES:-0} != 1 ]]; then
   echo "RUN_COLLECT_ASSEMBLIES must be 0 or 1: ${RUN_COLLECT_ASSEMBLIES}" >&2
+  exit 1
+fi
+
+if [[ -n $BATCH_START && $BATCH_SKIP != 0 ]]; then
+  echo "Use either BATCH_START or BATCH_SKIP, not both." >&2
+  exit 1
+fi
+
+if [[ -n $BATCH_START && -n $BATCH_IDS ]]; then
+  echo "Use either BATCH_START or BATCH_IDS, not both." >&2
+  exit 1
+fi
+
+if [[ $BATCH_SKIP != 0 && -n $BATCH_IDS ]]; then
+  echo "Use either BATCH_SKIP or BATCH_IDS, not both." >&2
   exit 1
 fi
 
@@ -199,10 +224,44 @@ if [[ ${#batch_files[@]} -eq 0 ]]; then
   exit 1
 fi
 
-selected_batch_files=("${batch_files[@]:$BATCH_SKIP:$BATCH_LIMIT}")
+selected_batch_files=()
+
+if [[ -n $BATCH_IDS ]]; then
+  IFS=',' read -r -a requested_batches <<< "$BATCH_IDS"
+  for batch_file in "${batch_files[@]}"; do
+    batch_base=$(basename "$batch_file" .csv)
+    batch_base=${batch_base%.fofn}
+    batch_base=${batch_base%.tsv}
+    batch_id=${batch_base##*_}
+    run_label=${BATCH_PREFIX}_${batch_id}
+
+    for requested in "${requested_batches[@]}"; do
+      requested=${requested//[[:space:]]/}
+      if [[ -z $requested ]]; then
+        continue
+      fi
+      if [[ $requested == "$batch_id" || $requested == "$run_label" || $requested == "$batch_base" ]]; then
+        selected_batch_files+=("$batch_file")
+        break
+      fi
+    done
+  done
+else
+  batch_offset=$BATCH_SKIP
+  if [[ -n $BATCH_START ]]; then
+    batch_offset=$((10#$BATCH_START - 1))
+  fi
+  selected_batch_files=("${batch_files[@]:$batch_offset:$BATCH_LIMIT}")
+fi
 
 if [[ ${#selected_batch_files[@]} -eq 0 ]]; then
-  echo "No batch files selected after applying BATCH_SKIP=${BATCH_SKIP} and BATCH_LIMIT=${BATCH_LIMIT}." >&2
+  if [[ -n $BATCH_IDS ]]; then
+    echo "No batch files matched BATCH_IDS=${BATCH_IDS}." >&2
+  elif [[ -n $BATCH_START ]]; then
+    echo "No batch files selected after applying BATCH_START=${BATCH_START} and BATCH_LIMIT=${BATCH_LIMIT}." >&2
+  else
+    echo "No batch files selected after applying BATCH_SKIP=${BATCH_SKIP} and BATCH_LIMIT=${BATCH_LIMIT}." >&2
+  fi
   exit 1
 fi
 

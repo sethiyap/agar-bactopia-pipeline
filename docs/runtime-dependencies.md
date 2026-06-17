@@ -44,7 +44,6 @@ These are not bundled in the repo and must exist on the execution site.
 - Python environment for final workbook export:
   - `python3`
   - `openpyxl`
-
 ## MLST Review Workflow
 
 The packaged workflow includes a phenotype-guided MLST review stage.

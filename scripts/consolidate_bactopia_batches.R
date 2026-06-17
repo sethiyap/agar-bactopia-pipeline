@@ -124,7 +124,7 @@ read_mlst_table <- function(path) {
   is_sample_token <- function(x) {
     grepl("^[0-9]{2}GNB-[0-9]+R?\\.(fna|fa|fasta)(\\.gz)?$", x, ignore.case = TRUE)
   }
-  is_batch_token <- function(x) grepl("^agar_batch_[0-9]+$", x)
+  is_batch_token <- function(x) grepl("^[[:alnum:]_]+_[0-9]{3}$", x)
   is_path_token <- function(x) grepl("^/", x)
   is_st_token <- function(x) grepl("^[0-9]+$", x) || identical(x, "-")
 
@@ -918,35 +918,6 @@ standardize_main_component <- function(dat, file_stub) {
   dat
 }
 
-write_workbook <- function(sheets, path) {
-  if (requireNamespace("openxlsx", quietly = TRUE)) {
-    wb <- openxlsx::createWorkbook()
-    used <- character()
-    for (name in names(sheets)) {
-      sheet_name <- sanitize_sheet_name(name, used)
-      used <- c(used, sheet_name)
-      openxlsx::addWorksheet(wb, sheet_name)
-      openxlsx::writeData(wb, sheet = sheet_name, x = sheets[[name]])
-    }
-    openxlsx::saveWorkbook(wb, path, overwrite = TRUE)
-    return("openxlsx")
-  }
-
-  if (requireNamespace("writexl", quietly = TRUE)) {
-    used <- character()
-    named_sheets <- list()
-    for (name in names(sheets)) {
-      sheet_name <- sanitize_sheet_name(name, used)
-      used <- c(used, sheet_name)
-      named_sheets[[sheet_name]] <- sheets[[name]]
-    }
-    writexl::write_xlsx(named_sheets, path)
-    return("writexl")
-  }
-
-  NULL
-}
-
 batch_dirs <- find_batch_dirs(results_root, batch_prefix)
 if (!length(batch_dirs)) {
   stop("No batch result directories were found under: ", results_root, call. = FALSE)
@@ -1020,45 +991,9 @@ if (nrow(run_summary) > 0L) {
   write_tsv_flex(run_summary, file.path(output_dir, "results_main", "merged-results", "run_summary.tsv"))
 }
 
-sheets <- list(
-  project_summary = project_summary
-)
-
-if (nrow(run_summary) > 0L) {
-  sheets[["run_summary"]] <- run_summary
-}
-
-if (nrow(tool_processing_log) > 0L) {
-  sheets[["tool_processing_log"]] <- tool_processing_log
-}
-
-for (name in sort(names(main_tables))) {
-  sheets[[paste0("main__", name)]] <- main_tables[[name]]
-}
-
-for (name in sort(names(tool_tables))) {
-  sheets[[paste0("tool__", name)]] <- tool_tables[[name]]
-}
-
-workbook_path <- file.path(output_dir, "consolidated_results.xlsx")
-writer <- write_workbook(sheets, workbook_path)
-
 message("TSV consolidation completed successfully.")
 message("Combined text results written to: ", normalizePath(output_dir, winslash = "/", mustWork = FALSE))
 if (nrow(tool_processing_log) > 0L) {
   message("Tool processing log written to: ", normalizePath(file.path(output_dir, "tool_processing_log.tsv"), winslash = "/", mustWork = FALSE))
 }
-if (is.null(writer)) {
-  note_path <- file.path(output_dir, "consolidated_results_excel_not_created.txt")
-  writeLines(
-    c(
-      "The combined TSV files were created successfully.",
-      "The Excel workbook was not created because neither `openxlsx` nor `writexl` is installed in this R environment."
-    ),
-    con = note_path
-  )
-  message("Excel workbook was skipped because `openxlsx` and `writexl` are unavailable.")
-  message("A note was written to: ", normalizePath(note_path, winslash = "/", mustWork = FALSE))
-} else {
-  message("Excel workbook written with ", writer, ": ", normalizePath(workbook_path, winslash = "/", mustWork = FALSE))
-}
+message("Consolidation complete. This step writes TSV outputs only.")

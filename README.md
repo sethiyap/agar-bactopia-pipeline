@@ -157,8 +157,8 @@ Minimum paths to verify:
 Then test the entrypoints:
 
 ```bash
-./bin/agar-bactopia
-./wrappers/submit.gadi.sh --help
+/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia
+/g/data/rg42/agar-bactopia-pipeline/wrappers/submit.gadi.sh --help
 ```
 
 For other servers, keep the same repo layout and add a site config plus wrapper
@@ -206,6 +206,11 @@ The submit wrapper expects exactly one metadata sheet matching
 `*_samplesheet.txt` under `METADATA_DIR`, unless you set `AGRF_SHEET_PATH`
 explicitly.
 
+The default batch family prefix is now `batch_bactopia`, so batch outputs are
+written under paths such as `batch_bactopia_001`,
+`batch_bactopia_001_tools`, and `batch_bactopia_consolidated` unless you
+override `BATCH_PREFIX`.
+
 Required metadata columns:
 
 - `Sample name`: sample identifier used to join metadata back onto the
@@ -251,15 +256,42 @@ Outputs:
 - `AGRF_samplesheet_with_results_mlst_reviewed.tsv`
 - optional `AGRF_samplesheet_with_results_post_review.tsv`
 
-The final Excel workbook export prefers
-`AGRF_samplesheet_with_results_mlst_reviewed.tsv` when present; otherwise it
+If `AGRF_samplesheet_with_results_mlst_reviewed.tsv` is present, it is the
+preferred reviewed output; otherwise use
+`AGRF_samplesheet_with_results.tsv`.
+
+When `RUN_EXPORT_RESULTS_WORKBOOK=1`, the launcher submits
+`run_export_bactopia_results_workbook.pbs` after mapping and optional MLST
+review. The exporter prefers
+`AGRF_samplesheet_with_results_mlst_reviewed.tsv` when present and otherwise
 falls back to `AGRF_samplesheet_with_results.tsv`.
 
-## First Workbook Sheet Columns
+If the batch outputs already exist and you only want to rerun consolidation,
+metadata mapping, MLST review, and workbook export, use:
 
-The first sheet in the Excel workbook is still named `AGRF_samplesheet_mapped`
-for backward compatibility, but it is now a generic metadata-mapped results
-sheet derived from your `*_samplesheet.txt` file.
+```bash
+POSTPROCESS_ONLY=1 \
+RUN_CONSOLIDATE=1 \
+RUN_MLST_REVIEW=1 \
+RUN_EXPORT_RESULTS_WORKBOOK=1 \
+./bin/agar-bactopia submit gadi \
+  /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
+  /scratch/rg42/AGAR/metadata/2025/B07 \
+  /scratch/rg42/AGAR/intermediates/2025/B07 \
+  50
+```
+
+For retry work on a specific batch or subset, the batch submitter accepts:
+
+- `BATCH_START` for a 1-based starting batch number
+- `BATCH_LIMIT` for how many batches to submit from that point
+- `BATCH_IDS` for an exact comma-separated subset such as `001` or
+  `batch_bactopia_001,batch_bactopia_004`
+
+## Mapped Result Columns
+
+The metadata-mapped results table is derived from your `*_samplesheet.txt`
+file.
 
 Always-present metadata columns:
 
@@ -301,12 +333,11 @@ Review columns:
 - `review_required`: `yes` when the MLST result needs manual or standalone
   review, otherwise `no`
 - `review_reason`: explanation for why the sample was flagged
-- `mlst_review_note`: present in the reviewed workbook sheet; explains how the
+- `mlst_review_note`: present in the reviewed mapped TSV; explains how the
   standalone MLST review resolved, or failed to resolve, the flagged sample
 
-If a reviewed table is available, the workbook exporter writes the resolved
-standalone MLST values back into `mlst_scheme`, `mlst_st`, and `mlst_profile`
-before creating sheet 1.
+If a reviewed table is available, the standalone MLST values are written back
+into `mlst_scheme`, `mlst_st`, and `mlst_profile` in the reviewed TSV.
 
 ## Layout
 

@@ -12,7 +12,7 @@
 set -euo pipefail
 
 # Collect all Bactopia assemblies from one batch, a results_main directory, or
-# recursively from a parent directory containing agar_batch* directories.
+# recursively from a parent directory containing numbered batch directories.
 #
 # Example:
 # qsub -v "INPUT_PATH=/scratch/rg42/AGAR/intermediates/2025/B05,OUTPUT_DIR=/scratch/rg42/AGAR/intermediates/2025/B05/all_assemblies" \
@@ -23,6 +23,7 @@ set -euo pipefail
 #   OUTPUT_DIR    Directory where all assemblies should be copied and unzipped
 INPUT_PATH=${INPUT_PATH:-}
 OUTPUT_DIR=${OUTPUT_DIR:-}
+BATCH_PREFIX=${BATCH_PREFIX:-batch_bactopia}
 
 log() {
   printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
@@ -58,12 +59,17 @@ resolve_results_main_dirs() {
     return
   fi
 
-  if [[ $(basename "$raw_input") == agar_batch* ]]; then
+  if [[ $(basename "$raw_input") =~ ^${BATCH_PREFIX}_[0-9]{3}$ ]]; then
     printf '%s\n' "$raw_input"
     return
   fi
 
-  find "$raw_input" -type d -path '*/agar_batch*/results_main' | sort
+  find "$raw_input" -type d -name 'results_main' | while IFS= read -r results_dir; do
+    parent_dir=$(basename "$(dirname "$results_dir")")
+    if [[ $parent_dir =~ ^${BATCH_PREFIX}_[0-9]{3}$ ]]; then
+      printf '%s\n' "$results_dir"
+    fi
+  done | sort
 }
 
 if [[ -z "$INPUT_PATH" ]]; then

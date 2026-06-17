@@ -8,7 +8,7 @@ Usage:
   bash scripts/run_review_mlst_from_tsv.sh \
     --review-tsv /path/to/AGRF_samplesheet_with_results_review_required.tsv \
     --results-root /scratch/rg42/AGAR/intermediates/2025/B05 \
-    [--batch-prefix agar_batch] \
+    [--batch-prefix batch_bactopia] \
     [--mapped-tsv /path/to/AGRF_samplesheet_with_results.tsv] \
     [--output-dir /scratch/rg42/AGAR/intermediates/2025/B05/mlst_review_standalone]
 
@@ -21,7 +21,7 @@ EOF
 
 REVIEW_TSV=""
 RESULTS_ROOT=""
-BATCH_PREFIX="agar_batch"
+BATCH_PREFIX="batch_bactopia"
 OUTPUT_DIR=""
 MAPPED_TSV=""
 

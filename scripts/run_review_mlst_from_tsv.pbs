@@ -24,8 +24,8 @@ set -euo pipefail
 #   BATCH_PREFIX     Default: batch_bactopia
 #   MAPPED_TSV       Default: <RESULTS_ROOT>/AGRF_samplesheet_with_results.tsv
 #   OUTPUT_DIR       Default: <RESULTS_ROOT>/mlst_review_standalone
-#   MINIFORGE_ROOT   Default: /g/data/rg42/bactopia_datasets/miniforge3
-#   MLST_ENV         Default: /g/data/rg42/bactopia_datasets/envs/mlst_env
+#   MINIFORGE_ROOT   Default: /g/data/<PROJECT>/bactopia_datasets/miniforge3
+#   MLST_ENV         Default: /g/data/<PROJECT>/bactopia_datasets/envs/mlst_env
 #   MLST_SCHEME      Optional forced scheme, e.g. ecoli_achtman_4
 
 RESULTS_ROOT=${RESULTS_ROOT:-${PBS_O_WORKDIR:-$PWD}}
@@ -33,8 +33,14 @@ BATCH_PREFIX=${BATCH_PREFIX:-batch_bactopia}
 REVIEW_TSV=${REVIEW_TSV:-${RESULTS_ROOT}/AGRF_samplesheet_with_results_review_required.tsv}
 MAPPED_TSV=${MAPPED_TSV:-${RESULTS_ROOT}/AGRF_samplesheet_with_results.tsv}
 OUTPUT_DIR=${OUTPUT_DIR:-${RESULTS_ROOT}/mlst_review_standalone}
-MINIFORGE_ROOT=${MINIFORGE_ROOT:-/g/data/rg42/bactopia_datasets/miniforge3}
-MLST_ENV=${MLST_ENV:-/g/data/rg42/bactopia_datasets/envs/mlst_env}
+default_project=${PROJECT:-}
+if [[ -z $default_project && $RESULTS_ROOT =~ ^/scratch/([^/]+)/ ]]; then
+  default_project=${BASH_REMATCH[1]}
+fi
+default_project=${default_project:-rg42}
+
+MINIFORGE_ROOT=${MINIFORGE_ROOT:-/g/data/${default_project}/bactopia_datasets/miniforge3}
+MLST_ENV=${MLST_ENV:-/g/data/${default_project}/bactopia_datasets/envs/mlst_env}
 MLST_SCHEME=${MLST_SCHEME:-}
 RUN_AGAR_ROOT=${RUN_AGAR_ROOT:-${PBS_O_WORKDIR:-$PWD}}
 

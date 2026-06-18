@@ -101,6 +101,19 @@ That keeps the environment writable by project group members and makes new
 files/directories inherit group `rg42`. When updating the shared environment,
 use `umask 0002` so new files stay group-writable.
 
+After creating the shared MLST review environment, verify it directly:
+
+```bash
+source /g/data/rg42/bactopia_datasets/miniforge3/etc/profile.d/conda.sh
+conda activate /g/data/rg42/bactopia_datasets/envs/mlst_env
+mlst --version
+python --version
+```
+
+Expected result: the shared environment activates cleanly, `mlst` is available,
+and `python` resolves from the shared environment rather than a home-directory
+install.
+
 ## Gadi Setup Steps
 
 1. Clone the repo into the shared Gadi location.

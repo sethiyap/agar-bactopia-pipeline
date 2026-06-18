@@ -57,10 +57,13 @@ EOF
 fi
 
 export PIPELINE_ROOT=$project_root
+export PIPELINE_CONFIG=$site_config
+set -a
 # shellcheck disable=SC1090
 source "$project_root/config/defaults.env"
 # shellcheck disable=SC1090
 source "$site_config"
+set +a
 
 case "${additional_tools_override:-}" in
   yes|YES|true|TRUE|1) export RUN_ADDITIONAL_TOOLS=1 ;;
@@ -75,5 +78,5 @@ esac
 export RUN_AGAR_DIR=$project_root
 batch_size=${4:-${BATCH_SIZE_DEFAULT:-50}}
 
-exec "$project_root/scripts/submit_agar_full_pipeline.sh" \
+exec "$project_root/scripts/submit_agar_full_pipeline.sh" --config "$site_config" \
   "$1" "$2" "$3" "$batch_size"

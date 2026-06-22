@@ -582,6 +582,29 @@ dedupe_by_sample <- function(dat) {
   dat
 }
 
+collect_result_samples <- function(...) {
+  tables <- list(...)
+  samples <- character()
+
+  for (dat in tables) {
+    if (is.null(dat) || !"sample" %in% names(dat) || !nrow(dat)) {
+      next
+    }
+    current <- dat$sample
+    current <- current[!is.na(current) & nzchar(current)]
+    current <- current[!current %in% samples]
+    if (length(current)) {
+      samples <- c(samples, current)
+    }
+  }
+
+  if (!length(samples)) {
+    return(NULL)
+  }
+
+  data.frame(sample = samples, stringsAsFactors = FALSE)
+}
+
 coalesce_nonempty_scalar <- function(...) {
   values <- list(...)
   for (value in values) {
@@ -875,6 +898,14 @@ fimtyper <- dedupe_by_sample(read_fimtyper_table(fimtyper_file))
 abritamr <- dedupe_by_sample(read_generic_tool_table(abritamr_file, "abritamr_"))
 plasmidfinder <- dedupe_by_sample(read_generic_tool_table(plasmidfinder_file, "plasmidfinder_"))
 bracken <- dedupe_by_sample(read_bracken_table(bracken_file))
+result_samples <- collect_result_samples(mlst, kleborate, fimtyper, abritamr, plasmidfinder, bracken)
+
+if (is.null(result_samples) || !nrow(result_samples)) {
+  stop(
+    "No samples were found in the consolidated result tables under --consolidated-dir.",
+    call. = FALSE
+  )
+}
 
 left_join_base <- function(x, y, by = "sample") {
   if (is.null(y) || !nrow(y)) {
@@ -889,7 +920,13 @@ left_join_base <- function(x, y, by = "sample") {
   x
 }
 
-merged <- agrf
+merged <- result_samples
+merged <- left_join_base(merged, agrf, by = "sample")
+if (!"Sample name" %in% names(merged)) {
+  merged[["Sample name"]] <- merged$sample
+}
+missing_sample_name <- is.na(merged[["Sample name"]]) | !nzchar(trimws(as.character(merged[["Sample name"]])))
+merged[["Sample name"]][missing_sample_name] <- merged$sample[missing_sample_name]
 merged <- left_join_base(merged, mlst, by = "sample")
 merged <- left_join_base(merged, kleborate, by = "sample")
 merged <- left_join_base(merged, fimtyper, by = "sample")

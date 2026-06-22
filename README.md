@@ -385,8 +385,9 @@ For retry work on a specific batch or subset, the batch submitter accepts:
 
 ## Mapped Result Columns
 
-The metadata-mapped results table is derived from your `*_samplesheet.txt`
-file.
+The metadata-mapped results table is derived from the sample names present in
+the consolidated outputs. Your `*_samplesheet.txt` is then used to attach the
+matching metadata columns for those processed samples only.
 
 Always-present metadata columns:
 

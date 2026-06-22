@@ -42,6 +42,9 @@ Environment variables:
                          Supported placeholders: {RAWDATA_DIR} {METADATA_DIR} {SAMPLESHEET_OUT}
   IS_AGAR_PROJECT        Default: auto. Set to 1 to force AGAR filename normalization,
                          0 to skip it for non-AGAR projects
+  AGAR_SAMPLE_REGEX      Default in AGAR mode: ^[0-9]{2}GNB-[0-9]+R?$
+                         Built-in FOFN creation keeps only sample prefixes
+                         matching this regex and skips other FASTQs
   POSTPROCESS_ONLY       Default: 0. Set to 1 to skip FASTQ and batch submission
                          and only run consolidation, mapping, review, and workbook export
   SKIP_NORMALIZE         Set to 1 to skip FASTQ name normalization
@@ -172,6 +175,7 @@ export_results_workbook_pbs_script=${EXPORT_RESULTS_WORKBOOK_PBS_SCRIPT:-$script
 export_results_workbook_python_bin=${EXPORT_RESULTS_WORKBOOK_PYTHON_BIN:-python3}
 export_results_workbook_script=${EXPORT_RESULTS_WORKBOOK_SCRIPT:-$script_dir/export_bactopia_results_workbook.py}
 is_agar_project=${IS_AGAR_PROJECT:-auto}
+agar_sample_regex=${AGAR_SAMPLE_REGEX:-^[0-9]{2}GNB-[0-9]+R?$}
 check_inode_quota=${CHECK_INODE_QUOTA:-1}
 inode_fs_min_free_count=${INODE_FS_MIN_FREE_COUNT:-50000}
 inode_fs_min_free_pct=${INODE_FS_MIN_FREE_PCT:-5}
@@ -548,7 +552,7 @@ if [[ $postprocess_only == 1 ]]; then
 elif [[ $skip_normalize != 1 && $is_agar_project == 1 ]]; then
   current_step="normalizing FASTQ sample names"
   log "INFO" "Normalizing FASTQ sample names in: $raw_fastq_dir"
-  "$normalize_script" "$raw_fastq_dir"
+  bash "$normalize_script" "$raw_fastq_dir"
 elif [[ $skip_normalize == 1 ]]; then
   log "INFO" "Skipping FASTQ sample name normalization because SKIP_NORMALIZE=1"
 else
@@ -563,13 +567,21 @@ elif [[ -n $create_fofn_command ]]; then
   fofn_cmd=${create_fofn_command//\{RAWDATA_DIR\}/$raw_fastq_dir}
   fofn_cmd=${fofn_cmd//\{METADATA_DIR\}/$metadata_dir}
   fofn_cmd=${fofn_cmd//\{SAMPLESHEET_OUT\}/$samplesheet_path}
+  if [[ $is_agar_project == 1 ]]; then
+    log "INFO" "AGAR mode with CREATE_FOFN_COMMAND. Custom FOFN creation is responsible for filtering mixed sample folders."
+  fi
   log "INFO" "Creating Bactopia samplesheet/FOFN: $samplesheet_path"
   eval "$fofn_cmd"
 elif [[ ! -f $samplesheet_path && -f $create_fofn_script ]]; then
   current_step="creating Bactopia FOFN with CREATE_FOFN_SCRIPT"
   mkdir -p "$(dirname "$samplesheet_path")"
   log "INFO" "Creating Bactopia samplesheet/FOFN with: $create_fofn_script"
-  "$create_fofn_script" "$raw_fastq_dir" "$samplesheet_path"
+  if [[ $is_agar_project == 1 ]]; then
+    log "INFO" "AGAR mode FOFN filter: keeping sample prefixes matching AGAR_SAMPLE_REGEX=$agar_sample_regex"
+    INCLUDE_SAMPLE_REGEX="$agar_sample_regex" bash "$create_fofn_script" "$raw_fastq_dir" "$samplesheet_path"
+  else
+    bash "$create_fofn_script" "$raw_fastq_dir" "$samplesheet_path"
+  fi
 fi
 
 if [[ $postprocess_only != 1 && ! -f $samplesheet_path ]]; then
@@ -579,7 +591,7 @@ fi
 if [[ $postprocess_only != 1 && $skip_validate != 1 ]]; then
   current_step="validating FOFN"
   log "INFO" "Validating FOFN: $samplesheet_path"
-  "$validate_script" "$samplesheet_path"
+  bash "$validate_script" "$samplesheet_path"
 fi
 
 current_step="preparing batch submission"

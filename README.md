@@ -6,122 +6,27 @@ stock Bactopia output was not operationally consistent with AGAR review.
 
 ## Motivation
 
-This package was created because native `bactopia v3.2.1` was not consistently
-compatible with the AGAR interpretation workflow on Gadi, especially when the
-bundled typing databases disagreed with phenotype expectations and external
-cross-check tools.
+This package exists because stock `bactopia v3.2.1` was close to the AGAR
+workflow, but not reliably consistent enough for routine interpretation on
+Gadi.
 
-The motivation is practical rather than architectural:
+The main gap was not just software versioning. In practice, AGAR needed tighter
+control over MLST database provenance, because different bundled PubMLST
+snapshots could produce calls that disagreed with phenotype expectations and
+external cross-checks. That made database choice, review follow-up, and output
+traceability operational requirements rather than optional extras.
 
-- AGAR needs the pipeline output to agree as closely as possible with phenotype
-  labels and with the external tools the lab already trusts for spot checks
-- stock Bactopia behavior was producing biologically important discrepancies
-  that could not be explained away as simple rerun noise
-- once those discrepancies were understood, the fixes were no longer just
-  "run Bactopia"; they became a reproducible compatibility layer that needed to
-  be packaged and documented
+The package also carries a few workflow-level compatibility fixes that AGAR
+needed in routine use:
 
-The clearest MLST example was `25GNB_0500`:
+- patched MLST database handling and provenance tracking
+- review-driven MLST follow-up for flagged isolates
+- Kleborate compatibility shims for the expected working behavior
+- standalone FimTyper integration and merge-back into project summaries
+- stable launcher, site config, and AGAR-facing mapped outputs
 
-- phenotype data identified the isolate as Klebsiella
-- native Bactopia MLST identified it as E. coli with low confidence
-- Galaxy identified it as Klebsiella
-- updating the `mlst` software version alone did not fix the discrepancy
-
-Visual summary:
-
-| Checkpoint | Result for `25GNB_0500` | Interpretation |
-| --- | --- | --- |
-| AGRF phenotype | `Klebsiella` | Expected biological label |
-| Native `bactopia v3.2.1` MLST | `E. coli` with low confidence | Discordant with phenotype |
-| Galaxy MLST cross-check | `Klebsiella` | Supports phenotype, not native Bactopia |
-| Bactopia after `mlst` software update | discrepancy persisted | Software update alone was insufficient |
-| AGAR-compatible patched MLST database | `Klebsiella` | Discrepancy resolved |
-
-```text
-AGRF phenotype says Klebsiella
-            |
-            v
-Native Bactopia v3.2.1 MLST says E. coli (low confidence)
-            |
-            +--> Galaxy MLST says Klebsiella
-            |
-            +--> upgrade mlst software only: still discordant
-            |
-            v
-Conclusion: the problem is not just the mlst executable
-            |
-            v
-Root cause: bundled MLST database snapshot mismatch
-            |
-            v
-AGAR-compatible fix: patch/control the MLST database bundle
-            |
-            v
-Resolved AGAR-compatible output: Klebsiella
-```
-
-The key finding was that `mlst` software version is not the same thing as MLST
-database version. Different environments were bundling different PubMLST
-snapshots, and those database differences were driving the disagreement.
-
-In other words, the original problem was not simply "Bactopia called the wrong
-scheme". The problem was that stock Bactopia was coupled to an MLST database
-snapshot that did not match the database context being used in Galaxy and other
-validation workflows. That is why:
-
-- upgrading `mlst` inside Bactopia did not automatically resolve the issue
-- cross-validation on Galaxy still pointed to a different biological answer
-- AGAR needed explicit control over the MLST database bundle, not just the
-  `mlst` executable version
-
-The patched AGAR-compatible workflow therefore treats MLST database provenance
-as a first-class compatibility requirement. Missing schemes can be copied from a
-working newer MLST database into the local Bactopia-compatible bundle, that
-bundle can be rebuilt and reused for reruns, and the chosen MLST dataset and
-database version can be reported back in the output metadata.
-
-That led to AGAR-specific changes that native `bactopia v3.2.1` did not provide
-out of the box:
-
-- patched MLST database handling so the required missing schemes could be copied
-  from a working newer MLST database into the local Bactopia-compatible bundle
-- explicit tracking of MLST dataset/database provenance so the output records
-  which patched database was actually used
-- review-driven MLST follow-up so flagged isolates can be resolved against AGRF
-  phenotype context instead of leaving low-confidence or ambiguous calls buried
-  in the merged output
-
-There was a second compatibility problem with Kleborate:
-
-- the newer Bactopia Kleborate workflow could produce widespread `Not tested`
-  output, including for Klebsiella isolates
-- the expected output matched older `kleborate 2.3.2`
-- the practical fix was to keep the newer Bactopia workflow wiring but run it
-  through a compatibility shim that translates modern Bactopia-style arguments
-  into the older working Kleborate CLI
-
-There was also a workflow gap around FimTyper:
-
-- FimTyper is not part of the stock Bactopia tool bundle in the form needed by
-  AGAR
-- the AGAR workflow therefore runs FimTyper as a separate Nextflow-compatible
-  step after `results_main`, then merges those per-sample outputs back into the
-  project summary tables
-
-So `agar-bactopia-pipeline` is not a new biological pipeline so much as an
-AGAR-compatible distribution of Bactopia with the compatibility pieces needed
-to make the results operationally usable:
-
-- stable launcher and site config
-- patched MLST database workflow
-- Kleborate compatibility shim
-- standalone FimTyper integration
-- AGRF mapping, MLST review, and workbook export as first-class outputs
-
-In short, the package exists because native Bactopia was close, but not
-sufficiently reliable for AGAR without these compatibility fixes and
-workflow-level additions.
+So `agar-bactopia-pipeline` is best understood as an AGAR-compatible
+distribution of Bactopia rather than a completely separate biological pipeline.
 
 ## Clone And Install On A Server
 
@@ -171,23 +76,6 @@ PBS_MAIL_OPTIONS=ae
 PBS_MAIL_USER=your.name@example.org
 ```
 
-If the site config is shared and you want notifications only for your own run,
-pass the email on the command line instead. This overrides the shared config
-for that submission:
-
-```bash
-./bin/agar-bactopia submit gadi \
-  --mail-user your.name@example.org \
-  --mail-options ae \
-  /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
-  /scratch/rg42/AGAR/metadata/2025/B07 \
-  /scratch/rg42/AGAR/intermediates/2025/B07 \
-  50
-```
-
-If you pass `--mail-user` without `--mail-options`, the wrapper defaults to
-`ae`.
-
 For other servers, keep the same repo layout and add a site config plus wrapper
 for that scheduler/backend, for example `slurm`.
 
@@ -196,6 +84,103 @@ for that scheduler/backend, for example `slurm`.
 - `gadi` submit wrapper
 - PBS batch orchestration
 - shared Bactopia/Kraken/datasets config through a site env file
+
+## Submit On Gadi
+
+Public entrypoint:
+
+```bash
+/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi [OPTIONS] RAW_FASTQ_DIR METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
+```
+
+Supported options:
+
+- `--additional-tools yes|no`
+  Turns the extra tool bundle on or off for this submission.
+- `--is-agar-project auto|1|0`
+  Controls AGAR auto-detection. Use `1` to force AGAR normalization and AGAR-only
+  FOFN filtering, `0` to skip AGAR-specific handling, or `auto` to use path-based
+  detection.
+- `--site-config /path/to/gadi.local.env`
+  Uses a different site env file instead of the default
+  `/g/data/rg42/agar-bactopia-pipeline/config/sites/gadi.local.env`.
+- `--mail-user you@example.org`
+  Overrides `PBS_MAIL_USER` for this submission only.
+- `--mail-options ae`
+  Overrides `PBS_MAIL_OPTIONS` for this submission only. If you pass
+  `--mail-user` without `--mail-options`, the wrapper defaults to `ae`.
+- `--help`
+  Prints the wrapper usage message.
+
+Positional arguments:
+
+- `RAW_FASTQ_DIR`
+  Directory containing the input FASTQ files.
+- `METADATA_DIR`
+  Directory containing exactly one `*_samplesheet.txt` and optionally
+  `samplesheet.fofn`.
+- `RESULTS_ROOT`
+  Output root for batches, consolidated results, review outputs, and workbook.
+- `BATCH_SIZE`
+  Optional batch size. If omitted, the wrapper uses `BATCH_SIZE_DEFAULT` from
+  config, otherwise `50`.
+
+Examples:
+
+Default submission:
+
+```bash
+/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
+  /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
+  /scratch/rg42/AGAR/metadata/2025/B07 \
+  /scratch/rg42/AGAR/intermediates/2025/B07 \
+  50
+```
+
+Enable the additional tools bundle:
+
+```bash
+/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
+  --additional-tools yes \
+  /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
+  /scratch/rg42/AGAR/metadata/2025/B07 \
+  /scratch/rg42/AGAR/intermediates/2025/B07 \
+  50
+```
+
+Force non-AGAR mode for mixed or non-AGAR folders:
+
+```bash
+/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
+  --is-agar-project 0 \
+  /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
+  /scratch/rg42/AGAR/metadata/2025/B07 \
+  /scratch/rg42/AGAR/intermediates/2025/B07 \
+  50
+```
+
+Use a different site config:
+
+```bash
+/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
+  --site-config /g/data/rg42/agar-bactopia-pipeline/config/sites/gadi.local.env \
+  /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
+  /scratch/rg42/AGAR/metadata/2025/B07 \
+  /scratch/rg42/AGAR/intermediates/2025/B07 \
+  50
+```
+
+Override PBS mail settings for one submission:
+
+```bash
+/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
+  --mail-user your.name@example.org \
+  --mail-options ae \
+  /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
+  /scratch/rg42/AGAR/metadata/2025/B07 \
+  /scratch/rg42/AGAR/intermediates/2025/B07 \
+  50
+```
 
 ## Quick start on Gadi
 
@@ -210,17 +195,7 @@ cp config/sites/gadi.env.example config/sites/gadi.local.env
 3. Submit:
 
 ```bash
-./bin/agar-bactopia submit gadi \
-  /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
-  /scratch/rg42/AGAR/metadata/2025/B07 \
-  /scratch/rg42/AGAR/intermediates/2025/B07 \
-  50
-```
-
-4. Enable the additional tools bundle if needed:
-
-```bash
-./bin/agar-bactopia submit gadi --additional-tools yes \
+/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
   /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
   /scratch/rg42/AGAR/metadata/2025/B07 \
   /scratch/rg42/AGAR/intermediates/2025/B07 \
@@ -249,6 +224,16 @@ For non-AGAR projects, sample names are not rewritten by the launcher. When
 `IS_AGAR_PROJECT=0` or auto-detection resolves the input as non-AGAR, the
 wrapper skips `normalize_agar_fastq_sample_names.sh` and goes straight to FOFN
 creation or validation.
+
+For AGAR projects, the built-in FOFN creator keeps only sample prefixes that
+match `AGAR_SAMPLE_REGEX` and skips other FASTQs in the same folder. The
+default AGAR regex is `^[0-9]{2}GNB-[0-9]+R?$`, so mixed folders do not carry
+non-AGAR sample names forward unless you provide a custom `samplesheet.fofn` or
+override the regex explicitly.
+
+At the public wrapper layer you can force the mode with
+`--is-agar-project auto|1|0`, for example `--is-agar-project 0` for non-AGAR
+or mixed folders that should skip AGAR normalization.
 
 How non-AGAR sample names are managed:
 

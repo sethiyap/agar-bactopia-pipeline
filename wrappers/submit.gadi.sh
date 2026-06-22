@@ -7,8 +7,12 @@ usage() {
 Usage:
   ./wrappers/submit.gadi.sh RAW_FASTQ_DIR METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
   ./wrappers/submit.gadi.sh --additional-tools yes RAW_FASTQ_DIR METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
+  ./wrappers/submit.gadi.sh --is-agar-project 0 RAW_FASTQ_DIR METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
   ./wrappers/submit.gadi.sh --site-config config/sites/gadi.local.env RAW_FASTQ_DIR METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
   ./wrappers/submit.gadi.sh --mail-user you@example.org [--mail-options ae] RAW_FASTQ_DIR METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
+
+Options:
+  --is-agar-project auto|1|0   Override AGAR auto-detection for mixed or non-AGAR inputs
 EOF
 }
 
@@ -16,6 +20,7 @@ wrapper_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 project_root=$(cd "$wrapper_dir/.." && pwd)
 site_config=${SITE_CONFIG:-$project_root/config/sites/gadi.local.env}
 additional_tools_override=
+is_agar_project_override=
 mail_user_override=
 mail_options_override=
 
@@ -27,6 +32,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --additional-tools)
       additional_tools_override=$2
+      shift 2
+      ;;
+    --is-agar-project)
+      is_agar_project_override=$2
       shift 2
       ;;
     --mail-user)
@@ -82,6 +91,15 @@ case "${additional_tools_override:-}" in
   "") ;;
   *)
     echo "--additional-tools must be yes|no|1|0" >&2
+    exit 1
+    ;;
+esac
+
+case "${is_agar_project_override:-}" in
+  auto|1|0|true|TRUE|false|FALSE|agar|other) export IS_AGAR_PROJECT=$is_agar_project_override ;;
+  "") ;;
+  *)
+    echo "--is-agar-project must be auto|1|0" >&2
     exit 1
     ;;
 esac

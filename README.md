@@ -326,6 +326,15 @@ BATCH_START=3 BATCH_LIMIT=2 \
   /scratch/rg42/AGAR/intermediates/2025/B07 \
   50
 
+# send PBS email notifications for this run only
+./bin/agar-bactopia submit gadi \
+  --mail-user your.name@example.org \
+  --mail-options ae \
+  /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
+  /scratch/rg42/AGAR/metadata/2025/B07 \
+  /scratch/rg42/AGAR/intermediates/2025/B07 \
+  50
+
 # postprocess only: consolidate + review + workbook export
 POSTPROCESS_ONLY=1 \
 RUN_CONSOLIDATE=1 \

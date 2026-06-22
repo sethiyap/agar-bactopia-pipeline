@@ -65,6 +65,8 @@ Environment variables:
   LOG_DIR                Default: dirname(LOG_FILE) or <RESULTS_ROOT>
   LOG_FILE               Default: <RESULTS_ROOT>/submit_agar_full_pipeline_<timestamp>.log
   PBS_LOG_DIR            Optional directory for all qsub .o/.e files
+  PBS_MAIL_OPTIONS       Optional qsub -m value, for example ae or abe
+  PBS_MAIL_USER          Optional qsub -M email address for PBS notifications
   CONSOLIDATE_PBS_SCRIPT Default: <script_dir>/run_consolidate_batches.pbs
   CONSOLIDATE_SCRIPT     Default: <script_dir>/consolidate_bactopia_batches.R
 
@@ -587,11 +589,19 @@ export RESULTS_ROOT=${RESULTS_ROOT:-$results_root_arg}
 export BATCH_DIR="$batch_dir"
 export BATCH_PREFIX="$batch_prefix"
 export PBS_LOG_DIR=${PBS_LOG_DIR:-}
+export PBS_MAIL_OPTIONS=${PBS_MAIL_OPTIONS:-}
+export PBS_MAIL_USER=${PBS_MAIL_USER:-}
 
 top_level_qsub_log_args=()
 if [[ -n ${PBS_LOG_DIR:-} ]]; then
   mkdir -p "$PBS_LOG_DIR"
   top_level_qsub_log_args=(-o "$PBS_LOG_DIR" -e "$PBS_LOG_DIR")
+fi
+if [[ -n ${PBS_MAIL_OPTIONS:-} ]]; then
+  top_level_qsub_log_args+=(-m "$PBS_MAIL_OPTIONS")
+fi
+if [[ -n ${PBS_MAIL_USER:-} ]]; then
+  top_level_qsub_log_args+=(-M "$PBS_MAIL_USER")
 fi
 
 consolidated_outdir=${CONSOLIDATED_OUTDIR:-${RESULTS_ROOT}/${BATCH_PREFIX}_consolidated}

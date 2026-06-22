@@ -120,7 +120,7 @@ install.
 
 ```bash
 cd /g/data/rg42
-git clone <repo-url> agar-bactopia-pipeline
+git clone https://github.com/sethiyap/agar-bactopia-pipeline.git agar-bactopia-pipeline
 cd /g/data/rg42/agar-bactopia-pipeline
 ```
 
@@ -143,6 +143,8 @@ vi config/sites/gadi.local.env
 - `FIMTYPER_CONFIG`
 - `MERGE_FIMTYPER_SCRIPT`
 - `SING_CACHE`
+- optional `PBS_MAIL_OPTIONS`
+- optional `PBS_MAIL_USER`
 
 4. Confirm the required software/modules exist on Gadi:
 
@@ -186,3 +188,12 @@ module avail R
   optional additional-tools choice.
 - Large reference data and databases should stay outside the repo and be
   referenced from `gadi.local.env`.
+- PBS email notifications can be enabled centrally in `gadi.local.env` with
+  `PBS_MAIL_OPTIONS` and `PBS_MAIL_USER`.
+- For a one-off personal submission against a shared config, pass
+  `--mail-user <email>` and optionally `--mail-options <events>` on the
+  `./bin/agar-bactopia submit gadi ...` command instead.
+- If Gadi reports an inode overload or scratch quota hold, check `df -Pi`,
+  `lquota`, and `nci_account -P <project>` and clean old scratch `work/`,
+  `batch_bactopia_*`, and other small-file-heavy run directories before
+  rerunning.

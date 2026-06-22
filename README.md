@@ -129,7 +129,7 @@ Example shared install on Gadi:
 
 ```bash
 cd /g/data/rg42
-git clone <repo-url> agar-bactopia-pipeline
+git clone https://github.com/sethiyap/agar-bactopia-pipeline.git agar-bactopia-pipeline
 cd /g/data/rg42/agar-bactopia-pipeline
 ```
 
@@ -153,6 +153,8 @@ Minimum paths to verify:
 - `FIMTYPER_CONFIG`
 - `MERGE_FIMTYPER_SCRIPT`
 - `SING_CACHE`
+- optional `PBS_MAIL_OPTIONS`
+- optional `PBS_MAIL_USER`
 
 Then test the entrypoints:
 
@@ -160,6 +162,31 @@ Then test the entrypoints:
 /g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia
 /g/data/rg42/agar-bactopia-pipeline/wrappers/submit.gadi.sh --help
 ```
+
+If you want PBS email notifications on Gadi, set them in
+`config/sites/gadi.local.env`, for example:
+
+```bash
+PBS_MAIL_OPTIONS=ae
+PBS_MAIL_USER=your.name@example.org
+```
+
+If the site config is shared and you want notifications only for your own run,
+pass the email on the command line instead. This overrides the shared config
+for that submission:
+
+```bash
+./bin/agar-bactopia submit gadi \
+  --mail-user your.name@example.org \
+  --mail-options ae \
+  /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
+  /scratch/rg42/AGAR/metadata/2025/B07 \
+  /scratch/rg42/AGAR/intermediates/2025/B07 \
+  50
+```
+
+If you pass `--mail-user` without `--mail-options`, the wrapper defaults to
+`ae`.
 
 For other servers, keep the same repo layout and add a site config plus wrapper
 for that scheduler/backend, for example `slurm`.
@@ -217,6 +244,20 @@ Required metadata columns:
   consolidated Bactopia outputs
 - `Comments`: free-text phenotype or lab note field used by the MLST review
   logic
+
+For non-AGAR projects, sample names are not rewritten by the launcher. When
+`IS_AGAR_PROJECT=0` or auto-detection resolves the input as non-AGAR, the
+wrapper skips `normalize_agar_fastq_sample_names.sh` and goes straight to FOFN
+creation or validation.
+
+How non-AGAR sample names are managed:
+
+- if the launcher creates `samplesheet.fofn`, the sample name is taken as-is
+  from each FASTQ basename before the first underscore in `*_R1.fastq.gz`
+- if you provide an existing `samplesheet.fofn`, its `sample` values are used
+  as provided
+- in both cases, the metadata `Sample name` column must match the final sample
+  names in the FOFN because no AGAR-specific renaming is applied
 
 All other metadata columns are ignored by the metadata-mapping step. They may
 still be kept in your source sheet for lab bookkeeping, but they are not
@@ -310,6 +351,21 @@ An inode limit is a file-count limit, not a size limit, so you can hit it even
 when there is still disk space left. If this check fails on Gadi, clean up old
 batch result folders, `work/` directories, and other no-longer-needed files
 under your project scratch area such as `/scratch/rg42/...`.
+
+How to get rid of an inode overload error on Gadi:
+
+- check whether the problem is filesystem inode headroom or project quota:
+  `df -Pi /scratch/rg42/...`, `lquota`, and `nci_account -P rg42`
+- remove old small-file-heavy scratch directories first, especially stale
+  Nextflow `work/` trees, old `batch_bactopia_*` result folders, and abandoned
+  temporary outputs under your previous `RESULTS_ROOT` paths
+- if the run has already finished and you only need the deliverables, archive
+  or transfer the final outputs elsewhere, then delete the older scratch copy
+- if scratch is crowded across multiple runs, start the next submission with a
+  fresh `RESULTS_ROOT` instead of reusing a directory full of old batch files
+- do not rely on `CHECK_INODE_QUOTA=0` as the fix: that only skips the early
+  guardrail and the job can still fail later if scratch inode usage is still
+  too high
 
 For retry work on a specific batch or subset, the batch submitter accepts:
 

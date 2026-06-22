@@ -45,6 +45,8 @@ Environment variables:
   BASE_DIR                Default: repo root above this script
   SAMPLESHEET_DIR         Override batch sheet directory used by run_bactopia_batch.pbs
   PBS_LOG_DIR             Optional directory for qsub .o/.e files
+  PBS_MAIL_OPTIONS        Optional qsub -m value, for example ae or abe
+  PBS_MAIL_USER           Optional qsub -M email address for PBS notifications
 
 Example:
   BATCH_SKIP=0 \
@@ -120,11 +122,19 @@ DATASETS_CACHE=${DATASETS_CACHE:-}
 SING_CACHE=${SING_CACHE:-}
 KLEBORATE_COMPAT_SCRIPT=${KLEBORATE_COMPAT_SCRIPT:-$script_dir/kleborate_232_compat.sh}
 PBS_LOG_DIR=${PBS_LOG_DIR:-}
+PBS_MAIL_OPTIONS=${PBS_MAIL_OPTIONS:-}
+PBS_MAIL_USER=${PBS_MAIL_USER:-}
 
 qsub_log_args=()
 if [[ -n $PBS_LOG_DIR ]]; then
   mkdir -p "$PBS_LOG_DIR"
   qsub_log_args=(-o "$PBS_LOG_DIR" -e "$PBS_LOG_DIR")
+fi
+if [[ -n $PBS_MAIL_OPTIONS ]]; then
+  qsub_log_args+=(-m "$PBS_MAIL_OPTIONS")
+fi
+if [[ -n $PBS_MAIL_USER ]]; then
+  qsub_log_args+=(-M "$PBS_MAIL_USER")
 fi
 
 if [[ ! -f $input_file ]]; then

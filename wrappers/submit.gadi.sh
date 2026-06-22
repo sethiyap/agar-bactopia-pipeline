@@ -85,6 +85,10 @@ source "$project_root/config/defaults.env"
 source "$site_config"
 set +a
 
+# Keep PBS mail settings per-submission only; do not inherit them from shared site config.
+unset PBS_MAIL_USER
+unset PBS_MAIL_OPTIONS
+
 case "${additional_tools_override:-}" in
   yes|YES|true|TRUE|1) export RUN_ADDITIONAL_TOOLS=1 ;;
   no|NO|false|FALSE|0) export RUN_ADDITIONAL_TOOLS=0 ;;

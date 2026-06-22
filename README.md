@@ -58,22 +58,12 @@ Minimum paths to verify:
 - `FIMTYPER_CONFIG`
 - `MERGE_FIMTYPER_SCRIPT`
 - `SING_CACHE`
-- optional `PBS_MAIL_OPTIONS`
-- optional `PBS_MAIL_USER`
 
 Then test the entrypoints:
 
 ```bash
 /g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia
 /g/data/rg42/agar-bactopia-pipeline/wrappers/submit.gadi.sh --help
-```
-
-If you want PBS email notifications on Gadi, set them in
-`config/sites/gadi.local.env`, for example:
-
-```bash
-PBS_MAIL_OPTIONS=ae
-PBS_MAIL_USER=your.name@example.org
 ```
 
 For other servers, keep the same repo layout and add a site config plus wrapper

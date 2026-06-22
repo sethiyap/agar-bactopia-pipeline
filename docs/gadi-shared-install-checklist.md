@@ -143,8 +143,6 @@ vi config/sites/gadi.local.env
 - `FIMTYPER_CONFIG`
 - `MERGE_FIMTYPER_SCRIPT`
 - `SING_CACHE`
-- optional `PBS_MAIL_OPTIONS`
-- optional `PBS_MAIL_USER`
 
 4. Confirm the required software/modules exist on Gadi:
 
@@ -188,8 +186,6 @@ module avail R
   optional additional-tools choice.
 - Large reference data and databases should stay outside the repo and be
   referenced from `gadi.local.env`.
-- PBS email notifications can be enabled centrally in `gadi.local.env` with
-  `PBS_MAIL_OPTIONS` and `PBS_MAIL_USER`.
 - For a one-off personal submission against a shared config, pass
   `--mail-user <email>` and optionally `--mail-options <events>` on the
   `./bin/agar-bactopia submit gadi ...` command instead.

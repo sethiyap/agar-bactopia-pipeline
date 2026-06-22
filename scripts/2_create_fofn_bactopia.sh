@@ -6,11 +6,23 @@ RAW_DIR="${1:?Usage: $0 <raw_dir> <output.fofn.tsv>}"
 OUT_FOFN="${2:?Usage: $0 <raw_dir> <output.fofn.tsv>}"
 INCLUDE_SAMPLE_REGEX="${INCLUDE_SAMPLE_REGEX:-}"
 
+record_unique_sample() {
+  local sample=$1
+  local existing
+  for existing in "${skipped_samples[@]:-}"; do
+    if [[ $existing == "$sample" ]]; then
+      return 0
+    fi
+  done
+  skipped_samples+=("$sample")
+}
+
 printf "sample\truntype\tr1\tr2\textra\n" > "$OUT_FOFN"
 
 total_r1=0
 included_pairs=0
 skipped_pairs=0
+skipped_samples=()
 
 while IFS= read -r r1; do
   total_r1=$((total_r1 + 1))
@@ -19,6 +31,7 @@ while IFS= read -r r1; do
 
   if [[ -n $INCLUDE_SAMPLE_REGEX && ! $sample =~ $INCLUDE_SAMPLE_REGEX ]]; then
     skipped_pairs=$((skipped_pairs + 1))
+    record_unique_sample "$sample"
     continue
   fi
 
@@ -59,4 +72,6 @@ fi
 echo "FOFN pairs included: $included_pairs"
 if [[ $skipped_pairs -gt 0 ]]; then
   echo "FOFN pairs skipped by sample filter: $skipped_pairs"
+  echo "Skipped sample prefixes:"
+  printf '  - %s\n' "${skipped_samples[@]}"
 fi

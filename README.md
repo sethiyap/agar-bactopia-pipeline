@@ -216,10 +216,11 @@ wrapper skips `normalize_agar_fastq_sample_names.sh` and goes straight to FOFN
 creation or validation.
 
 For AGAR projects, the built-in FOFN creator keeps only sample prefixes that
-match `AGAR_SAMPLE_REGEX` and skips other FASTQs in the same folder. The
-default AGAR regex is `^[0-9]{2}GNB-[0-9]+R?$`, so mixed folders do not carry
-non-AGAR sample names forward unless you provide a custom `samplesheet.fofn` or
-override the regex explicitly.
+match `AGAR_SAMPLE_REGEX`, reports the skipped sample prefixes, and excludes
+those other FASTQs from `samplesheet.fofn`. The default AGAR regex is
+`^[0-9]{2}GNB-[0-9]+R?$`, so mixed folders do not carry non-AGAR sample names
+forward unless you provide a custom `samplesheet.fofn` or override the regex
+explicitly.
 
 At the public wrapper layer you can force the mode with
 `--is-agar-project auto|1|0`, for example `--is-agar-project 0` for non-AGAR

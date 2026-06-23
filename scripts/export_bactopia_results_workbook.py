@@ -83,6 +83,24 @@ def choose_mapped_results(results_root: Path) -> Path:
     )
 
 
+def find_st131typer_summary(dir_path: Path) -> Path | None:
+    candidates = [
+        dir_path / "summary.txt",
+        dir_path / "summary.tsv",
+        dir_path / "summary.csv",
+    ]
+    for candidate in candidates:
+        if candidate.exists() and candidate.is_file():
+            return candidate
+
+    for pattern in ("summary.txt*", "summary.tsv*", "summary.csv*"):
+        matches = sorted(p for p in dir_path.glob(pattern) if p.is_file())
+        if matches:
+            return matches[0]
+
+    return None
+
+
 def add_sheet(workbook: Workbook, used_names: set[str], name: str, rows: list[list[str]]) -> None:
     worksheet = workbook.create_sheet(title=sanitize_sheet_name(name, used_names))
     for row in rows:
@@ -139,8 +157,13 @@ def main() -> int:
             add_sheet(workbook, used_names, sheet_name, read_table(path))
 
     if st131typer_dir is not None:
-        for sheet_name, path in collect_tables(st131typer_dir, "st131typer"):
-            add_sheet(workbook, used_names, sheet_name, read_table(path))
+        summary_path = find_st131typer_summary(st131typer_dir)
+        if summary_path is None:
+            raise SystemExit(
+                f"No ST131Typer summary table was found under: {st131typer_dir}. "
+                "Expected summary.txt, summary.tsv, or summary.csv."
+            )
+        add_sheet(workbook, used_names, "st131typer_summary", read_table(summary_path))
 
     workbook.save(output_path)
     print(f"Excel workbook written with openpyxl: {output_path}")

@@ -19,7 +19,10 @@ Environment variables:
 
 This submits two jobs:
   1. run ST131Typer against the assemblies directory
-  2. append the resulting TSV/CSV tables into the workbook
+  2. append the ST131Typer summary table into the workbook
+
+ST131Typer itself requires an explicit output directory via `-o`; the helper
+passes that through as `ST131_TYPER_OUTPUT_DIR`.
 EOF
 }
 

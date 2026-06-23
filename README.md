@@ -341,7 +341,8 @@ RUN_ST131_TYPER=1 \
   50
 
 # only run ST131Typer for an existing assemblies folder and append the TSV/CSV
-# tables into the workbook
+# summary table into the workbook
+# ST131Typer requires an explicit output directory with `-o`
 ./scripts/submit_st131typer_append.sh \
   /scratch/rg42/AGAR/intermediates/2025/B07/batch_bactopia_001_assemblies \
   /scratch/rg42/AGAR/intermediates/2025/B07/batch_bactopia_results.xlsx

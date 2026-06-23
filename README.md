@@ -83,6 +83,13 @@ Public entrypoint:
 /g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi [OPTIONS] RAW_FASTQ_DIR METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
 ```
 
+Operational note:
+
+- Run the public command from your home directory, for example
+  `/home/562/ps1744`, rather than from `/g/data/rg42/agar-bactopia-pipeline`.
+  That keeps the launcher's own log file and any default PBS `.o`/`.e` files
+  tied to your user area instead of cluttering the shared `/g/data` install.
+
 Supported options:
 
 - `--additional-tools yes|no`
@@ -185,6 +192,7 @@ cp config/sites/gadi.env.example config/sites/gadi.local.env
 3. Submit:
 
 ```bash
+cd /home/562/ps1744
 /g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
   /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
   /scratch/rg42/AGAR/metadata/2025/B07 \
@@ -288,7 +296,7 @@ Common examples:
 ```bash
 # test one batch
 BATCH_IDS=005 BATCH_LIMIT=1 \
-./bin/agar-bactopia submit gadi \
+/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
   /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
   /scratch/rg42/AGAR/metadata/2025/B07 \
   /scratch/rg42/AGAR/intermediates/2025/B07 \
@@ -296,14 +304,14 @@ BATCH_IDS=005 BATCH_LIMIT=1 \
 
 # start from batch 3
 BATCH_START=3 BATCH_LIMIT=2 \
-./bin/agar-bactopia submit gadi \
+/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
   /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
   /scratch/rg42/AGAR/metadata/2025/B07 \
   /scratch/rg42/AGAR/intermediates/2025/B07 \
   50
 
 # send PBS email notifications for this run only
-./bin/agar-bactopia submit gadi \
+/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
   --mail-user your.name@example.org \
   --mail-options ae \
   /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
@@ -316,7 +324,7 @@ POSTPROCESS_ONLY=1 \
 RUN_CONSOLIDATE=1 \
 RUN_MLST_REVIEW=1 \
 RUN_EXPORT_RESULTS_WORKBOOK=1 \
-./bin/agar-bactopia submit gadi \
+/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
   /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
   /scratch/rg42/AGAR/metadata/2025/B07 \
   /scratch/rg42/AGAR/intermediates/2025/B07 \

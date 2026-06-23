@@ -155,14 +155,15 @@ module avail R
 5. Test the public CLI help:
 
 ```bash
-./bin/agar-bactopia
-./wrappers/submit.gadi.sh --help
+/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia
+/g/data/rg42/agar-bactopia-pipeline/wrappers/submit.gadi.sh --help
 ```
 
 6. Run one small test submission:
 
 ```bash
-./bin/agar-bactopia submit gadi \
+cd /home/562/ps1744
+/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
   /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
   /scratch/rg42/AGAR/metadata/2025/B07 \
   /scratch/rg42/AGAR/intermediates/2025/B07 \
@@ -172,7 +173,7 @@ module avail R
 7. If needed, enable the extra tool bundle:
 
 ```bash
-./bin/agar-bactopia submit gadi --additional-tools yes \
+/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi --additional-tools yes \
   /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
   /scratch/rg42/AGAR/metadata/2025/B07 \
   /scratch/rg42/AGAR/intermediates/2025/B07 \
@@ -186,9 +187,14 @@ module avail R
   optional additional-tools choice.
 - Large reference data and databases should stay outside the repo and be
   referenced from `gadi.local.env`.
+- Run the public submit command from your home directory, for example
+  `/home/562/ps1744`, rather than from `/g/data/rg42/agar-bactopia-pipeline`.
+  That keeps launcher logs and default PBS `.o`/`.e` files out of the shared
+  install path.
 - For a one-off personal submission against a shared config, pass
   `--mail-user <email>` and optionally `--mail-options <events>` on the
-  `./bin/agar-bactopia submit gadi ...` command instead.
+  `/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi ...`
+  command instead.
 - If Gadi reports an inode overload or scratch quota hold, check `df -Pi`,
   `lquota`, and `nci_account -P <project>` and clean old scratch `work/`,
   `batch_bactopia_*`, and other small-file-heavy run directories before

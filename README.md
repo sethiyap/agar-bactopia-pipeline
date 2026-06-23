@@ -120,7 +120,9 @@ Positional arguments:
   Output root for batches, consolidated results, review outputs, and workbook.
 - `BATCH_SIZE`
   Optional batch size. If omitted, the wrapper uses `BATCH_SIZE_DEFAULT` from
-  config, otherwise `50`.
+  config, otherwise `50`. The default split size keeps each PBS batch job
+  small enough to manage on Gadi and makes partial reruns simpler if one batch
+  fails. It is an operational default, not a biological threshold.
 
 Examples:
 
@@ -329,6 +331,20 @@ RUN_EXPORT_RESULTS_WORKBOOK=1 \
   /scratch/rg42/AGAR/metadata/2025/B07 \
   /scratch/rg42/AGAR/intermediates/2025/B07 \
   50
+
+# include ST131Typer after the assemblies folder is created
+RUN_ST131_TYPER=1 \
+/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
+  /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
+  /scratch/rg42/AGAR/metadata/2025/B07 \
+  /scratch/rg42/AGAR/intermediates/2025/B07 \
+  50
+
+# only run ST131Typer for an existing assemblies folder and append the TSV/CSV
+# tables into the workbook
+./scripts/submit_st131typer_append.sh \
+  /scratch/rg42/AGAR/intermediates/2025/B07/batch_bactopia_001_assemblies \
+  /scratch/rg42/AGAR/intermediates/2025/B07/batch_bactopia_results.xlsx
 ```
 
 In `POSTPROCESS_ONLY=1` mode, the trailing `50` does not limit the work to 50

@@ -1,0 +1,36 @@
+#!/bin/bash
+#PBS -P rg42
+#PBS -q normal
+#PBS -l walltime=08:00:00
+#PBS -l ncpus=1
+#PBS -l mem=8GB
+#PBS -l jobfs=20GB
+#PBS -l storage=scratch/rg42+gdata/rg42
+#PBS -N st131typer
+#PBS -l wd
+
+set -euo pipefail
+
+ASSEMBLIES_DIR=${ASSEMBLIES_DIR:-}
+RESULTS_ROOT=${RESULTS_ROOT:-${PBS_O_WORKDIR:-$PWD}}
+ST131_TYPER_SCRIPT=${ST131_TYPER_SCRIPT:-}
+ST131_TYPER_OUTPUT_DIR=${ST131_TYPER_OUTPUT_DIR:-${RESULTS_ROOT}/st131typer}
+
+if [[ -z "$ASSEMBLIES_DIR" || ! -d "$ASSEMBLIES_DIR" ]]; then
+  echo "ASSEMBLIES_DIR not found: $ASSEMBLIES_DIR" >&2
+  exit 1
+fi
+
+if [[ -z "$ST131_TYPER_SCRIPT" || ! -f "$ST131_TYPER_SCRIPT" ]]; then
+  echo "ST131_TYPER_SCRIPT not found: $ST131_TYPER_SCRIPT" >&2
+  exit 1
+fi
+
+mkdir -p "$ST131_TYPER_OUTPUT_DIR"
+
+echo "Running ST131Typer"
+echo "ASSEMBLIES_DIR=$ASSEMBLIES_DIR"
+echo "ST131_TYPER_OUTPUT_DIR=$ST131_TYPER_OUTPUT_DIR"
+echo "ST131_TYPER_SCRIPT=$ST131_TYPER_SCRIPT"
+
+bash "$ST131_TYPER_SCRIPT" -i "$ASSEMBLIES_DIR" -o "$ST131_TYPER_OUTPUT_DIR"

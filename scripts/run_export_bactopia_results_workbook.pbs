@@ -16,13 +16,15 @@ CONSOLIDATED_DIR=${CONSOLIDATED_DIR:-}
 WORKBOOK_OUTPUT=${WORKBOOK_OUTPUT:-}
 EXPORT_SCRIPT=${EXPORT_SCRIPT:-}
 PYTHON_BIN=${PYTHON_BIN:-python3}
+ST131_TYPER_DIR=${ST131_TYPER_DIR:-}
+EXPORT_APPEND=${EXPORT_APPEND:-0}
 
-if [[ -z "$RESULTS_ROOT" || ! -d "$RESULTS_ROOT" ]]; then
+if [[ $EXPORT_APPEND != 1 && ( -z "$RESULTS_ROOT" || ! -d "$RESULTS_ROOT" ) ]]; then
   echo "RESULTS_ROOT not found: $RESULTS_ROOT" >&2
   exit 1
 fi
 
-if [[ -z "$CONSOLIDATED_DIR" || ! -d "$CONSOLIDATED_DIR" ]]; then
+if [[ $EXPORT_APPEND != 1 && ( -z "$CONSOLIDATED_DIR" || ! -d "$CONSOLIDATED_DIR" ) ]]; then
   echo "CONSOLIDATED_DIR not found: $CONSOLIDATED_DIR" >&2
   exit 1
 fi
@@ -42,7 +44,22 @@ if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
   exit 1
 fi
 
-"$PYTHON_BIN" "$EXPORT_SCRIPT" \
-  --results-root "$RESULTS_ROOT" \
-  --consolidated-dir "$CONSOLIDATED_DIR" \
-  --output "$WORKBOOK_OUTPUT"
+cmd=("$PYTHON_BIN" "$EXPORT_SCRIPT" "--output" "$WORKBOOK_OUTPUT")
+
+if [[ -n "$RESULTS_ROOT" ]]; then
+  cmd+=(--results-root "$RESULTS_ROOT")
+fi
+
+if [[ -n "$CONSOLIDATED_DIR" ]]; then
+  cmd+=(--consolidated-dir "$CONSOLIDATED_DIR")
+fi
+
+if [[ -n "$ST131_TYPER_DIR" ]]; then
+  cmd+=(--st131typer-dir "$ST131_TYPER_DIR")
+fi
+
+if [[ $EXPORT_APPEND == 1 ]]; then
+  cmd+=(--append)
+fi
+
+"${cmd[@]}"

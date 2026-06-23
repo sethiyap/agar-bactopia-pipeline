@@ -28,7 +28,8 @@ Inputs:
                  The metadata sheet must contain 'Sample name' and 'Comments'.
                  Other metadata columns are ignored by downstream metadata mapping.
   RESULTS_ROOT   Intermediate results directory, for example /scratch/rg42/AGAR/intermediates/2025/B05
-  BATCH_SIZE     Default: 50
+  BATCH_SIZE     Default: 50. The split keeps each PBS batch job manageable on
+                 Gadi and makes reruns smaller if a single batch fails.
 
 Environment variables:
   PIPELINE_CONFIG        Optional shell env file to source before resolving defaults
@@ -55,6 +56,7 @@ Environment variables:
   RUN_MLST_REVIEW        Default: 1. Set to 0 to skip the standalone MLST review follow-up
   RUN_POST_REVIEW_MAP    Default: 0. Set to 1 only if you explicitly want a
                          second AGRF remap driven by mlst_review.tsv
+  RUN_ST131_TYPER        Default: 0. Set to 1 to run ST131Typer after assemblies
   RUN_EXPORT_RESULTS_WORKBOOK Default: 1. Set to 0 to skip final Excel workbook export
   CHECK_INODE_QUOTA      Default: 1. Set to 0 to skip the inode preflight check
   INODE_FS_MIN_FREE_COUNT Default: 50000. Fail early if df reports fewer free inodes
@@ -64,6 +66,7 @@ Environment variables:
   MAP_OUTPUT             Default: <RESULTS_ROOT>/AGRF_samplesheet_with_results.tsv
   REVIEW_OUTPUT_DIR      Default: <RESULTS_ROOT>/mlst_review_standalone
   POST_REVIEW_MAP_OUTPUT Default: <RESULTS_ROOT>/AGRF_samplesheet_with_results_post_review.tsv
+  ST131_TYPER_OUTPUT_DIR Default: <RESULTS_ROOT>/<basename(RESULTS_ROOT)>_st131typer
   RESULTS_WORKBOOK_OUTPUT Default: <RESULTS_ROOT>/<basename(RESULTS_ROOT)>_results.xlsx
   LOG_DIR                Default: dirname(LOG_FILE) or <RESULTS_ROOT>
   LOG_FILE               Default: <RESULTS_ROOT>/submit_agar_full_pipeline_<timestamp>.log
@@ -149,6 +152,7 @@ run_consolidate=${RUN_CONSOLIDATE:-1}
 map_agrf_results=${MAP_AGRF_RESULTS:-1}
 run_mlst_review=${RUN_MLST_REVIEW:-1}
 run_post_review_map=${RUN_POST_REVIEW_MAP:-0}
+run_st131typer=${RUN_ST131_TYPER:-0}
 run_export_results_workbook=${RUN_EXPORT_RESULTS_WORKBOOK:-1}
 map_output=${MAP_OUTPUT:-$results_root_arg/AGRF_samplesheet_with_results.tsv}
 review_output_dir=${REVIEW_OUTPUT_DIR:-$results_root_arg/mlst_review_standalone}
@@ -171,6 +175,10 @@ consolidate_r_script=${CONSOLIDATE_SCRIPT:-$script_dir/consolidate_bactopia_batc
 map_pbs_script=${MAP_PBS_SCRIPT:-$script_dir/run_map_agrf_samplesheet_results.pbs}
 map_r_script=${MAP_R_SCRIPT:-$script_dir/map_agrf_samplesheet_results.R}
 review_mlst_pbs_script=${REVIEW_MLST_PBS_SCRIPT:-$script_dir/run_review_mlst_from_tsv.pbs}
+st131typer_pbs_script=${ST131_TYPER_PBS_SCRIPT:-$script_dir/run_st131typer_from_assemblies.pbs}
+st131typer_script=${ST131_TYPER_SCRIPT:-$run_agar_dir/ST131Typer.sh}
+st131typer_input_dir=${ST131_TYPER_INPUT_DIR:-}
+st131typer_output_dir=${ST131_TYPER_OUTPUT_DIR:-$results_root_arg/$(basename "$results_root_arg")_st131typer}
 export_results_workbook_pbs_script=${EXPORT_RESULTS_WORKBOOK_PBS_SCRIPT:-$script_dir/run_export_bactopia_results_workbook.pbs}
 export_results_workbook_python_bin=${EXPORT_RESULTS_WORKBOOK_PYTHON_BIN:-python3}
 export_results_workbook_script=${EXPORT_RESULTS_WORKBOOK_SCRIPT:-$script_dir/export_bactopia_results_workbook.py}
@@ -520,6 +528,14 @@ if [[ $run_export_results_workbook == 1 ]]; then
   done
 fi
 
+if [[ $run_st131typer == 1 ]]; then
+  for path in "$st131typer_pbs_script" "$st131typer_script"; do
+    if [[ ! -f $path ]]; then
+      fail "Required ST131Typer script not found: $path"
+    fi
+  done
+fi
+
 if [[ $postprocess_only != 1 ]]; then
   current_step="checking raw FASTQ inputs"
   fastq_count=$(find "$raw_fastq_dir" -maxdepth 1 -type f \( -name "*.fastq.gz" -o -name "*.fq.gz" \) | wc -l | tr -d ' ')
@@ -604,6 +620,13 @@ export BATCH_PREFIX="$batch_prefix"
 export PBS_LOG_DIR=${PBS_LOG_DIR:-}
 export PBS_MAIL_OPTIONS=${PBS_MAIL_OPTIONS:-}
 export PBS_MAIL_USER=${PBS_MAIL_USER:-}
+export RUN_ST131_TYPER=$run_st131typer
+export ST131_TYPER_PBS_SCRIPT="$st131typer_pbs_script"
+export ST131_TYPER_SCRIPT="$st131typer_script"
+export ST131_TYPER_OUTPUT_DIR="$st131typer_output_dir"
+if [[ -n $st131typer_input_dir ]]; then
+  export ST131_TYPER_INPUT_DIR="$st131typer_input_dir"
+fi
 
 top_level_qsub_log_args=()
 if [[ -n ${PBS_LOG_DIR:-} ]]; then
@@ -619,6 +642,7 @@ fi
 
 consolidated_outdir=${CONSOLIDATED_OUTDIR:-${RESULTS_ROOT}/${BATCH_PREFIX}_consolidated}
 consolidate_job_id=
+st131typer_job_id=
 
 if [[ $postprocess_only == 1 ]]; then
   if [[ $run_consolidate == 1 ]]; then
@@ -649,6 +673,10 @@ else
   consolidate_job_id=$(
     printf '%s\n' "$submit_output" |
       awk '/^consolidation job / {gsub(":", "", $3); print $3}'
+  )
+  st131typer_job_id=$(
+    printf '%s\n' "$submit_output" |
+      awk '/^st131typer job / {gsub(":", "", $3); print $3}'
   )
 fi
 
@@ -729,11 +757,19 @@ fi
 if [[ $run_export_results_workbook == 1 ]]; then
   current_step="submitting results workbook export job"
   workbook_qsub_args=("${top_level_qsub_log_args[@]}" -N results_xlsx_job)
-  if [[ -n $final_dependency_job ]]; then
-    workbook_qsub_args+=(-W "depend=afterok:${final_dependency_job}")
+  workbook_dependency_job=$final_dependency_job
+  if [[ -n $st131typer_job_id ]]; then
+    if [[ -n $workbook_dependency_job ]]; then
+      workbook_dependency_job="${workbook_dependency_job}:${st131typer_job_id}"
+    else
+      workbook_dependency_job=$st131typer_job_id
+    fi
+  fi
+  if [[ -n $workbook_dependency_job ]]; then
+    workbook_qsub_args+=(-W "depend=afterok:${workbook_dependency_job}")
   fi
   workbook_qsub_args+=(
-    -v "RESULTS_ROOT=${RESULTS_ROOT},CONSOLIDATED_DIR=${consolidated_outdir},WORKBOOK_OUTPUT=${results_workbook_output},EXPORT_SCRIPT=${export_results_workbook_script},PYTHON_BIN=${export_results_workbook_python_bin}"
+    -v "RESULTS_ROOT=${RESULTS_ROOT},CONSOLIDATED_DIR=${consolidated_outdir},WORKBOOK_OUTPUT=${results_workbook_output},EXPORT_SCRIPT=${export_results_workbook_script},PYTHON_BIN=${export_results_workbook_python_bin}${run_st131typer:+,ST131_TYPER_DIR=${st131typer_output_dir}}"
     "$export_results_workbook_pbs_script"
   )
   workbook_qsub_output=$(qsub "${workbook_qsub_args[@]}")

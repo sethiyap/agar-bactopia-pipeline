@@ -39,6 +39,11 @@ Environment variables:
   FIMTYPER_AFTER          assembly|tools|kleborate|all_tools, default: all_tools
   RUN_COLLECT_ASSEMBLIES  Default: 1
   ASSEMBLIES_OUTDIR       Default: <results_root>/<basename(results_root)>_assemblies
+  RUN_ST131_TYPER         Default: 0
+  ST131_TYPER_PBS_SCRIPT   Default: <script_dir>/run_st131typer_from_assemblies.pbs
+  ST131_TYPER_SCRIPT      Default: <repo_root>/ST131Typer.sh
+  ST131_TYPER_INPUT_DIR    Default: <ASSEMBLIES_OUTDIR>
+  ST131_TYPER_OUTPUT_DIR   Default: <results_root>/<basename(results_root)>_st131typer
   RESULTS_ROOT            Default: /scratch/<project>/<user>/bactopia_results
   RUN_CONSOLIDATE         Default: 1
   CONSOLIDATED_OUTDIR     Default: <results_root>/<batch_prefix>_consolidated
@@ -108,6 +113,7 @@ MERGE_FIMTYPER_SCRIPT=${MERGE_FIMTYPER_SCRIPT:-}
 FIMTYPER_PROFILE=${FIMTYPER_PROFILE:-}
 FIMTYPER_AFTER=${FIMTYPER_AFTER:-all_tools}
 RUN_COLLECT_ASSEMBLIES=${RUN_COLLECT_ASSEMBLIES:-1}
+RUN_ST131_TYPER=${RUN_ST131_TYPER:-0}
 RUN_CONSOLIDATE=${RUN_CONSOLIDATE:-1}
 BASE_DIR=${BASE_DIR:-$(cd "$script_dir/.." && pwd)}
 SAMPLESHEET_DIR=${SAMPLESHEET_DIR:-$BATCH_DIR}
@@ -115,6 +121,10 @@ run_user=${USER_NAME:-${USER:-unknown}}
 RESULTS_ROOT=${RESULTS_ROOT:-/scratch/${PROJECT:-rg42}/${run_user}/bactopia_results}
 results_root_base=$(basename "$RESULTS_ROOT")
 ASSEMBLIES_OUTDIR=${ASSEMBLIES_OUTDIR:-${RESULTS_ROOT}/${results_root_base}_assemblies}
+ST131_TYPER_PBS_SCRIPT=${ST131_TYPER_PBS_SCRIPT:-$script_dir/run_st131typer_from_assemblies.pbs}
+ST131_TYPER_SCRIPT=${ST131_TYPER_SCRIPT:-$BASE_DIR/ST131Typer.sh}
+ST131_TYPER_INPUT_DIR=${ST131_TYPER_INPUT_DIR:-$ASSEMBLIES_OUTDIR}
+ST131_TYPER_OUTPUT_DIR=${ST131_TYPER_OUTPUT_DIR:-${RESULTS_ROOT}/${results_root_base}_st131typer}
 CONSOLIDATED_OUTDIR=${CONSOLIDATED_OUTDIR:-${RESULTS_ROOT}/${BATCH_PREFIX}_consolidated}
 NEXTFLOW_CONFIG=${NEXTFLOW_CONFIG:-}
 BACTOPIA_PIPELINE=${BACTOPIA_PIPELINE:-}
@@ -174,6 +184,11 @@ fi
 
 if [[ ${RUN_COLLECT_ASSEMBLIES:-0} != 0 && ${RUN_COLLECT_ASSEMBLIES:-0} != 1 ]]; then
   echo "RUN_COLLECT_ASSEMBLIES must be 0 or 1: ${RUN_COLLECT_ASSEMBLIES}" >&2
+  exit 1
+fi
+
+if [[ ${RUN_ST131_TYPER:-0} != 0 && ${RUN_ST131_TYPER:-0} != 1 ]]; then
+  echo "RUN_ST131_TYPER must be 0 or 1: ${RUN_ST131_TYPER}" >&2
   exit 1
 fi
 
@@ -280,6 +295,7 @@ echo "Submitting ${#selected_batch_files[@]} batch pipeline(s) from ${#batch_fil
 terminal_jobs=()
 assembly_jobs=()
 previous_batch_terminal_job=
+st131typer_job=
 
 for batch_file in "${selected_batch_files[@]}"; do
   batch_base=$(basename "$batch_file" .csv)
@@ -393,6 +409,18 @@ if [[ $RUN_COLLECT_ASSEMBLIES != 0 && ${#assembly_jobs[@]} -gt 0 ]]; then
     "$script_dir/run_fetch_batch_assemblies.pbs")
   assemblies_job=${assemblies_job%%.*}
   echo "assemblies job ${assemblies_job}: ${ASSEMBLIES_OUTDIR}"
+fi
+
+if [[ $RUN_ST131_TYPER != 0 ]]; then
+  if [[ -z ${assemblies_job:-} ]]; then
+    echo "RUN_ST131_TYPER=1 requires RUN_COLLECT_ASSEMBLIES=1 so the assemblies folder can be created first." >&2
+    exit 1
+  fi
+  st131typer_job=$(qsub "${qsub_log_args[@]}" -W "depend=afterok:${assemblies_job}" \
+    -v "ASSEMBLIES_DIR=${ST131_TYPER_INPUT_DIR},RESULTS_ROOT=${RESULTS_ROOT},ST131_TYPER_SCRIPT=${ST131_TYPER_SCRIPT},ST131_TYPER_OUTPUT_DIR=${ST131_TYPER_OUTPUT_DIR}" \
+    "$ST131_TYPER_PBS_SCRIPT")
+  st131typer_job=${st131typer_job%%.*}
+  echo "st131typer job ${st131typer_job}: ${ST131_TYPER_OUTPUT_DIR}"
 fi
 
 if [[ $RUN_CONSOLIDATE != 0 && ${#terminal_jobs[@]} -gt 0 ]]; then

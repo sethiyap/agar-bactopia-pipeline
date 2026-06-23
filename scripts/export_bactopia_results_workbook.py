@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 try:
-    from openpyxl import Workbook
+    from openpyxl import Workbook, load_workbook
 except ImportError as exc:  # pragma: no cover
     sys.stderr.write(
         "openpyxl is required for workbook export.\n"
@@ -20,9 +20,11 @@ except ImportError as exc:  # pragma: no cover
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--results-root", required=True)
-    parser.add_argument("--consolidated-dir", required=True)
+    parser.add_argument("--results-root")
+    parser.add_argument("--consolidated-dir")
     parser.add_argument("--output", required=True)
+    parser.add_argument("--st131typer-dir")
+    parser.add_argument("--append", action="store_true")
     return parser.parse_args()
 
 
@@ -87,36 +89,58 @@ def add_sheet(workbook: Workbook, used_names: set[str], name: str, rows: list[li
         worksheet.append(row)
 
 
-def main() -> int:
-    args = parse_args()
-    results_root = Path(args.results_root)
-    consolidated_dir = Path(args.consolidated_dir)
-    output_path = Path(args.output)
-
-    if not results_root.is_dir():
-        raise SystemExit(f"--results-root must point to an existing directory: {results_root}")
-    if not consolidated_dir.is_dir():
-        raise SystemExit(f"--consolidated-dir must point to an existing directory: {consolidated_dir}")
-
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+def load_output_workbook(output_path: Path, append: bool) -> Workbook:
+    if append and output_path.exists():
+        return load_workbook(output_path)
 
     workbook = Workbook()
     workbook.remove(workbook.active)
-    used_names: set[str] = set()
+    return workbook
 
-    mapped_path = choose_mapped_results(results_root)
-    add_sheet(workbook, used_names, "AGRF_samplesheet_mapped", read_table(mapped_path))
 
-    for top_level in ("project_summary.tsv", "tool_processing_log.tsv"):
-        path = consolidated_dir / top_level
-        if path.exists():
-            add_sheet(workbook, used_names, path.stem, read_table(path))
+def main() -> int:
+    args = parse_args()
+    results_root = Path(args.results_root) if args.results_root else None
+    consolidated_dir = Path(args.consolidated_dir) if args.consolidated_dir else None
+    output_path = Path(args.output)
+    st131typer_dir = Path(args.st131typer_dir) if args.st131typer_dir else None
 
-    for sheet_name, path in collect_tables(consolidated_dir / "results_main" / "merged-results", "main"):
-        add_sheet(workbook, used_names, sheet_name, read_table(path))
+    if consolidated_dir is not None and results_root is None:
+        raise SystemExit("--results-root is required when --consolidated-dir is provided")
 
-    for sheet_name, path in collect_tables(consolidated_dir / "tools", "tool"):
-        add_sheet(workbook, used_names, sheet_name, read_table(path))
+    if not args.append and (results_root is None or consolidated_dir is None):
+        raise SystemExit("--results-root and --consolidated-dir are required unless --append is used")
+
+    if results_root is not None and not results_root.is_dir():
+        raise SystemExit(f"--results-root must point to an existing directory: {results_root}")
+    if consolidated_dir is not None and not consolidated_dir.is_dir():
+        raise SystemExit(f"--consolidated-dir must point to an existing directory: {consolidated_dir}")
+    if st131typer_dir is not None and not st131typer_dir.is_dir():
+        raise SystemExit(f"--st131typer-dir must point to an existing directory: {st131typer_dir}")
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    workbook = load_output_workbook(output_path, args.append)
+    used_names: set[str] = set(workbook.sheetnames)
+
+    if results_root is not None and consolidated_dir is not None:
+        mapped_path = choose_mapped_results(results_root)
+        add_sheet(workbook, used_names, "AGRF_samplesheet_mapped", read_table(mapped_path))
+
+        for top_level in ("project_summary.tsv", "tool_processing_log.tsv"):
+            path = consolidated_dir / top_level
+            if path.exists():
+                add_sheet(workbook, used_names, path.stem, read_table(path))
+
+        for sheet_name, path in collect_tables(consolidated_dir / "results_main" / "merged-results", "main"):
+            add_sheet(workbook, used_names, sheet_name, read_table(path))
+
+        for sheet_name, path in collect_tables(consolidated_dir / "tools", "tool"):
+            add_sheet(workbook, used_names, sheet_name, read_table(path))
+
+    if st131typer_dir is not None:
+        for sheet_name, path in collect_tables(st131typer_dir, "st131typer"):
+            add_sheet(workbook, used_names, sheet_name, read_table(path))
 
     workbook.save(output_path)
     print(f"Excel workbook written with openpyxl: {output_path}")

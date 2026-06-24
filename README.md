@@ -163,8 +163,10 @@ Operational note:
 
 - Run the public command from your home directory, for example
   `/home/562/ps1744`, rather than from `/g/data/rg42/agar-bactopia-pipeline`.
-  That keeps the launcher's own log file and any default PBS `.o`/`.e` files
-  tied to your user area instead of cluttering the shared `/g/data` install.
+  That keeps any default PBS `.o`/`.e` files tied to your user area instead of
+  cluttering the shared `/g/data` install.
+- If you want the PBS `.o`/`.e` files somewhere explicit, set
+  `PBS_LOG_DIR=/scratch/<project>/<user>/pbs_logs` before submission.
 
 Supported options:
 

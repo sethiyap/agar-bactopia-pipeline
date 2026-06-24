@@ -655,11 +655,8 @@ if [[ $postprocess_only == 1 ]]; then
   fi
 else
   current_step="submitting batch workflow"
-  log "INFO" "Submitting batch workflow from: $run_agar_dir"
-  submit_output=$(
-    cd "$run_agar_dir"
-    "$submit_script" "$samplesheet_path" "$batch_size"
-  )
+  log "INFO" "Submitting batch workflow from launch directory: $(pwd)"
+  submit_output=$("$submit_script" "$samplesheet_path" "$batch_size")
   printf '%s\n' "$submit_output"
 
   consolidate_job_id=$(

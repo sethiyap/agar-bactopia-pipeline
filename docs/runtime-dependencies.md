@@ -7,14 +7,18 @@ and helper logic needed to run the AGAR Bactopia workflow.
 
 - `bin/agar-bactopia`
 - `wrappers/submit.gadi.sh`
+- `wrappers/submit.slurm.sh`
 - `config/defaults.env`
 - `config/sites/gadi.env.example`
+- `config/sites/slurm.env.example`
 - `scripts/submit_agar_full_pipeline.sh`
 - `scripts/submit_bactopia_batch_pipeline.sh`
 - PBS wrappers under `scripts/*.pbs`
+- Slurm wrappers under `scripts/*.slurm`
 - helper shell scripts under `scripts/*.sh`
 - shipped workflow configs:
   - `scripts/nextflow.gadi.all_tools.config`
+  - `scripts/nextflow.slurm.all_tools.config`
   - `scripts/kleborate_232_compat.config`
   - `scripts/kleborate_232_compat.sh`
 
@@ -82,9 +86,9 @@ Reviewed outputs include:
 - `AGRF_samplesheet_with_results_mlst_reviewed.tsv`
 - optional `AGRF_samplesheet_with_results_post_review.tsv`
 
-## Gadi Environment Assumptions
+## Backend Assumptions
 
-The current `gadi` backend assumes:
+The `gadi` backend assumes:
 
 - PBS Pro scheduler
 - module environment with:
@@ -93,9 +97,17 @@ The current `gadi` backend assumes:
   - `R`
 - writable scratch space under `/scratch/<project>/<user>/...`
 
+The `slurm` backend assumes:
+
+- a Linux host with Slurm
+- `nextflow`
+- `singularity` or `apptainer`
+- `R`
+- writable scratch or project work space appropriate for your site
+
 ## Site Config Entry Point
 
-All shared Gadi paths should be set through:
+Gadi installs should set shared paths through:
 
 - `config/sites/gadi.local.env`
 
@@ -107,3 +119,16 @@ cp config/sites/gadi.env.example config/sites/gadi.local.env
 
 That file is the intended place to define the shared database paths and site
 defaults before distribution.
+
+Generic Slurm installs should set site paths through:
+
+- `config/sites/slurm.local.env`
+
+Create it from:
+
+```bash
+cp config/sites/slurm.env.example config/sites/slurm.local.env
+```
+
+That file is the intended place to define your non-Gadi Slurm paths, scratch
+defaults, and optional Slurm partition or account settings.

@@ -66,8 +66,15 @@ Then test the entrypoints:
 /g/data/rg42/agar-bactopia-pipeline/wrappers/submit.gadi.sh --help
 ```
 
-For other servers, keep the same repo layout and add a site config plus wrapper
-for that scheduler/backend, for example `slurm`.
+For other Linux servers, the repo now also ships a generic Slurm wrapper and
+site-config template:
+
+```bash
+cp config/sites/slurm.env.example config/sites/slurm.local.env
+./wrappers/submit.slurm.sh --help
+```
+
+Edit `config/sites/slurm.local.env` for your site before submitting.
 
 ## Optional Tool Installs For Non-Gadi Or Non-`rg42` Sites
 
@@ -104,6 +111,18 @@ mlst --version
 seqkit version
 ```
 
+If you want the repo to manage local copies for you, use:
+
+```bash
+./scripts/install_optional_local_tools.sh
+```
+
+That helper installs Miniforge under `<repo_root>/.local`, creates a local
+`mlst` + `seqkit` Conda environment, clones
+`https://github.com/JohnsonSingerLab/ST131Typer.git`, and links
+`<repo_root>/ST131Typer.sh` to the cloned script so the existing wrapper
+defaults keep working.
+
 ST131Typer helper:
 
 - the ST131Typer steps do not bundle `ST131Typer.sh`
@@ -122,11 +141,15 @@ command -v mlst
 command -v seqkit
 ```
 
-## Current backend
+## Packaged Backends
 
-- `gadi` submit wrapper
-- PBS batch orchestration
-- shared Bactopia/Kraken/datasets config through a site env file
+- `gadi`: PBS Pro wrapper and Gadi-oriented shared-path defaults
+- `slurm`: generic Slurm wrapper and Linux-oriented site template
+
+Both backends still assume a Linux execution site with Nextflow plus
+Singularity or Apptainer available. Cloning the repo on macOS is fine for code
+inspection and editing, but the packaged pipeline runners are not a native
+macOS execution target.
 
 ## Submit On Gadi
 
@@ -233,6 +256,49 @@ Override PBS mail settings for one submission:
   /scratch/rg42/AGAR/intermediates/2025/B07 \
   50
 ```
+
+## Submit On Slurm
+
+Public entrypoint:
+
+```bash
+./bin/agar-bactopia submit slurm [OPTIONS] RAW_FASTQ_DIR METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
+```
+
+First-time setup:
+
+```bash
+cp config/sites/slurm.env.example config/sites/slurm.local.env
+```
+
+Edit `config/sites/slurm.local.env` for your site paths, especially:
+
+- `BACTOPIA_PIPELINE`
+- `DATASETS_CACHE`
+- `KRAKEN2_DB`
+- `NEXTFLOW_CONFIG`
+- `FIMTYPER_PIPELINE`
+- `FIMTYPER_CONFIG`
+- `MINIFORGE_ROOT`
+- `MLST_ENV`
+- `SING_CACHE`
+- optional `SLURM_PARTITION`
+- optional `SLURM_ACCOUNT`
+- optional `SLURM_CLUSTER_OPTIONS`
+
+Example:
+
+```bash
+./bin/agar-bactopia submit slurm \
+  --site-config config/sites/slurm.local.env \
+  /path/to/raw_fastqs \
+  /path/to/metadata \
+  /scratch/$USER/bactopia_runs/project_001 \
+  50
+```
+
+The public options are the same as `submit gadi`: `--additional-tools`,
+`--is-agar-project`, `--site-config`, `--mail-user`, and `--mail-options`.
 
 ## Quick start on Gadi
 
@@ -493,14 +559,14 @@ into `mlst_scheme`, `mlst_st`, and `mlst_profile` in the reviewed TSV.
 
 - `bin/agar-bactopia`: public CLI
 - `wrappers/submit.gadi.sh`: Gadi-facing submission wrapper
+- `wrappers/submit.slurm.sh`: generic Slurm-facing submission wrapper
 - `config/defaults.env`: scheduler-agnostic defaults
 - `config/sites/`: site-specific shared paths
-- `scripts/`: internal pipeline helpers and PBS jobs
+- `scripts/`: internal pipeline helpers plus scheduler job wrappers
 - `docs/runtime-dependencies.md`: bundled-vs-external runtime dependency audit
 - `docs/gadi-shared-install-checklist.md`: shared Gadi deployment checklist
 
 ## Next steps
 
-- add a `slurm` backend
 - move more runtime assumptions out of PBS scripts into site configs
 - add install and validation docs under `docs/`

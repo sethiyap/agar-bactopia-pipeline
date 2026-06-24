@@ -70,9 +70,9 @@ Environment variables:
   RESULTS_WORKBOOK_OUTPUT Default: <RESULTS_ROOT>/<basename(RESULTS_ROOT)>_results.xlsx
   LOG_DIR                Default: dirname(LOG_FILE) or <RESULTS_ROOT>
   LOG_FILE               Default: <RESULTS_ROOT>/submit_agar_full_pipeline_<timestamp>.log
-  PBS_LOG_DIR            Optional directory for all qsub .o/.e files
-  PBS_MAIL_OPTIONS       Optional qsub -m value, for example ae or abe
-  PBS_MAIL_USER          Optional qsub -M email address for PBS notifications
+  PBS_LOG_DIR            Optional directory for scheduler stdout/stderr files
+  PBS_MAIL_OPTIONS       Optional PBS-style mail flags, for example ae or abe
+  PBS_MAIL_USER          Optional email address for scheduler notifications
   CONSOLIDATE_PBS_SCRIPT Default: <script_dir>/run_consolidate_batches.pbs
   CONSOLIDATE_SCRIPT     Default: <script_dir>/consolidate_bactopia_batches.R
 
@@ -85,6 +85,8 @@ EOF
 }
 
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck disable=SC1091
+source "$script_dir/lib_scheduler.sh"
 
 pipeline_config=${PIPELINE_CONFIG:-}
 
@@ -628,18 +630,6 @@ if [[ -n $st131typer_input_dir ]]; then
   export ST131_TYPER_INPUT_DIR="$st131typer_input_dir"
 fi
 
-top_level_qsub_log_args=()
-if [[ -n ${PBS_LOG_DIR:-} ]]; then
-  mkdir -p "$PBS_LOG_DIR"
-  top_level_qsub_log_args=(-o "$PBS_LOG_DIR" -e "$PBS_LOG_DIR")
-fi
-if [[ -n ${PBS_MAIL_OPTIONS:-} ]]; then
-  top_level_qsub_log_args+=(-m "$PBS_MAIL_OPTIONS")
-fi
-if [[ -n ${PBS_MAIL_USER:-} ]]; then
-  top_level_qsub_log_args+=(-M "$PBS_MAIL_USER")
-fi
-
 consolidated_outdir=${CONSOLIDATED_OUTDIR:-${RESULTS_ROOT}/${BATCH_PREFIX}_consolidated}
 consolidate_job_id=
 st131typer_job_id=
@@ -648,12 +638,14 @@ if [[ $postprocess_only == 1 ]]; then
   if [[ $run_consolidate == 1 ]]; then
     current_step="submitting consolidation-only workflow"
     log "INFO" "Submitting consolidation-only job for existing batches under: $results_root_arg"
-    consolidate_qsub_output=$(
-      qsub "${top_level_qsub_log_args[@]}" \
-        -v "RESULTS_ROOT=${RESULTS_ROOT},BATCH_PREFIX=${BATCH_PREFIX},CONSOLIDATED_OUTDIR=${consolidated_outdir},CONSOLIDATE_SCRIPT=${consolidate_r_script}" \
-        "$consolidate_pbs_script"
-    )
-    consolidate_job_id=${consolidate_qsub_output%%.*}
+    consolidate_job_id=$(scheduler_submit \
+      "" \
+      "" \
+      "RESULTS_ROOT=${RESULTS_ROOT},BATCH_PREFIX=${BATCH_PREFIX},CONSOLIDATED_OUTDIR=${consolidated_outdir},CONSOLIDATE_SCRIPT=${consolidate_r_script}" \
+      "$consolidate_pbs_script" \
+      "${PBS_LOG_DIR:-}" \
+      "${PBS_MAIL_OPTIONS:-}" \
+      "${PBS_MAIL_USER:-}")
     log "INFO" "Consolidation job ${consolidate_job_id}: ${consolidated_outdir}"
   else
     if [[ ! -d $consolidated_outdir ]]; then
@@ -689,16 +681,14 @@ if [[ $map_agrf_results == 1 && -z $consolidate_job_id && $postprocess_only != 1
   exit 0
 elif [[ $map_agrf_results == 1 ]]; then
   current_step="submitting AGRF mapping job"
-  map_qsub_args=("${top_level_qsub_log_args[@]}" -N agrf_map_job)
-  if [[ -n $final_dependency_job ]]; then
-    map_qsub_args+=(-W "depend=afterok:${final_dependency_job}")
-  fi
-  map_qsub_args+=(
-    -v "AGRF_SHEET=${agrf_sheet_path},CONSOLIDATED_DIR=${consolidated_outdir},MAP_OUTPUT=${map_output},MAP_SCRIPT=${map_r_script}"
-    "$map_pbs_script"
-  )
-  map_qsub_output=$(qsub "${map_qsub_args[@]}")
-  map_job_id=${map_qsub_output%%.*}
+  map_job_id=$(scheduler_submit \
+    "agrf_map_job" \
+    "$final_dependency_job" \
+    "AGRF_SHEET=${agrf_sheet_path},CONSOLIDATED_DIR=${consolidated_outdir},MAP_OUTPUT=${map_output},MAP_SCRIPT=${map_r_script}" \
+    "$map_pbs_script" \
+    "${PBS_LOG_DIR:-}" \
+    "${PBS_MAIL_OPTIONS:-}" \
+    "${PBS_MAIL_USER:-}")
   log "INFO" "AGRF mapping job ${map_job_id}: ${map_output}"
   final_dependency_job=$map_job_id
 elif [[ $run_mlst_review == 1 ]]; then
@@ -709,28 +699,27 @@ fi
 
 if [[ $run_mlst_review == 1 ]]; then
   current_step="submitting MLST review job"
-  review_qsub_args=("${top_level_qsub_log_args[@]}" -N mlst_review_job)
-  if [[ -n $final_dependency_job ]]; then
-    review_qsub_args+=(-W "depend=afterok:${final_dependency_job}")
-  fi
-  review_qsub_args+=(
-    -v "REVIEW_TSV=${review_tsv},RESULTS_ROOT=${RESULTS_ROOT},MAPPED_TSV=${map_output},OUTPUT_DIR=${review_output_dir},RUN_AGAR_ROOT=${run_agar_dir},MINIFORGE_ROOT=${MINIFORGE_ROOT:-},MLST_ENV=${MLST_ENV:-}"
-    "$review_mlst_pbs_script"
-  )
-  review_qsub_output=$(qsub "${review_qsub_args[@]}")
-  review_job_id=${review_qsub_output%%.*}
+  review_job_id=$(scheduler_submit \
+    "mlst_review_job" \
+    "$final_dependency_job" \
+    "REVIEW_TSV=${review_tsv},RESULTS_ROOT=${RESULTS_ROOT},MAPPED_TSV=${map_output},OUTPUT_DIR=${review_output_dir},RUN_AGAR_ROOT=${run_agar_dir},MINIFORGE_ROOT=${MINIFORGE_ROOT:-},MLST_ENV=${MLST_ENV:-}" \
+    "$review_mlst_pbs_script" \
+    "${PBS_LOG_DIR:-}" \
+    "${PBS_MAIL_OPTIONS:-}" \
+    "${PBS_MAIL_USER:-}")
   log "INFO" "MLST review job ${review_job_id}: ${review_tsv}"
   final_dependency_job=$review_job_id
 
   if [[ $run_post_review_map == 1 ]]; then
     current_step="submitting post-review AGRF mapping job"
-    post_review_map_qsub_output=$(
-      qsub "${top_level_qsub_log_args[@]}" -N agrf_post_review_map_job \
-        -W "depend=afterok:${review_job_id}" \
-        -v "AGRF_SHEET=${agrf_sheet_path},CONSOLIDATED_DIR=${consolidated_outdir},MAP_OUTPUT=${post_review_map_output},MAP_SCRIPT=${map_r_script},MLST_FILE=${review_mlst_file}" \
-        "$map_pbs_script"
-    )
-    post_review_map_job_id=${post_review_map_qsub_output%%.*}
+    post_review_map_job_id=$(scheduler_submit \
+      "agrf_post_review_map_job" \
+      "$review_job_id" \
+      "AGRF_SHEET=${agrf_sheet_path},CONSOLIDATED_DIR=${consolidated_outdir},MAP_OUTPUT=${post_review_map_output},MAP_SCRIPT=${map_r_script},MLST_FILE=${review_mlst_file}" \
+      "$map_pbs_script" \
+      "${PBS_LOG_DIR:-}" \
+      "${PBS_MAIL_OPTIONS:-}" \
+      "${PBS_MAIL_USER:-}")
     log "INFO" "Post-review AGRF mapping job ${post_review_map_job_id}: ${post_review_map_output}"
     final_dependency_job=$post_review_map_job_id
   fi
@@ -740,24 +729,22 @@ elif [[ $run_post_review_map == 1 ]]; then
   fi
 
   current_step="submitting post-review AGRF mapping job"
-  post_review_map_qsub_args=("${top_level_qsub_log_args[@]}" -N agrf_post_review_map_job)
-  if [[ -n $final_dependency_job ]]; then
-    post_review_map_qsub_args+=(-W "depend=afterok:${final_dependency_job}")
-  fi
-  post_review_map_qsub_args+=(
-    -v "AGRF_SHEET=${agrf_sheet_path},CONSOLIDATED_DIR=${consolidated_outdir},MAP_OUTPUT=${post_review_map_output},MAP_SCRIPT=${map_r_script},MLST_FILE=${review_mlst_file}"
-    "$map_pbs_script"
-  )
-  post_review_map_qsub_output=$(qsub "${post_review_map_qsub_args[@]}")
-  post_review_map_job_id=${post_review_map_qsub_output%%.*}
+  post_review_map_job_id=$(scheduler_submit \
+    "agrf_post_review_map_job" \
+    "$final_dependency_job" \
+    "AGRF_SHEET=${agrf_sheet_path},CONSOLIDATED_DIR=${consolidated_outdir},MAP_OUTPUT=${post_review_map_output},MAP_SCRIPT=${map_r_script},MLST_FILE=${review_mlst_file}" \
+    "$map_pbs_script" \
+    "${PBS_LOG_DIR:-}" \
+    "${PBS_MAIL_OPTIONS:-}" \
+    "${PBS_MAIL_USER:-}")
   log "INFO" "Post-review AGRF mapping job ${post_review_map_job_id}: ${post_review_map_output}"
   final_dependency_job=$post_review_map_job_id
 fi
 
 if [[ $run_export_results_workbook == 1 ]]; then
   current_step="submitting results workbook export job"
-  workbook_qsub_args=("${top_level_qsub_log_args[@]}" -N results_xlsx_job)
   workbook_dependency_job=$final_dependency_job
+  workbook_st131_env=
   if [[ -n $st131typer_job_id ]]; then
     if [[ -n $workbook_dependency_job ]]; then
       workbook_dependency_job="${workbook_dependency_job}:${st131typer_job_id}"
@@ -765,15 +752,17 @@ if [[ $run_export_results_workbook == 1 ]]; then
       workbook_dependency_job=$st131typer_job_id
     fi
   fi
-  if [[ -n $workbook_dependency_job ]]; then
-    workbook_qsub_args+=(-W "depend=afterok:${workbook_dependency_job}")
+  if [[ $run_st131typer == 1 ]]; then
+    workbook_st131_env=",ST131_TYPER_DIR=${st131typer_output_dir}"
   fi
-  workbook_qsub_args+=(
-    -v "RESULTS_ROOT=${RESULTS_ROOT},CONSOLIDATED_DIR=${consolidated_outdir},WORKBOOK_OUTPUT=${results_workbook_output},EXPORT_SCRIPT=${export_results_workbook_script},PYTHON_BIN=${export_results_workbook_python_bin}${run_st131typer:+,ST131_TYPER_DIR=${st131typer_output_dir}}"
-    "$export_results_workbook_pbs_script"
-  )
-  workbook_qsub_output=$(qsub "${workbook_qsub_args[@]}")
-  workbook_job_id=${workbook_qsub_output%%.*}
+  workbook_job_id=$(scheduler_submit \
+    "results_xlsx_job" \
+    "$workbook_dependency_job" \
+    "RESULTS_ROOT=${RESULTS_ROOT},CONSOLIDATED_DIR=${consolidated_outdir},WORKBOOK_OUTPUT=${results_workbook_output},EXPORT_SCRIPT=${export_results_workbook_script},PYTHON_BIN=${export_results_workbook_python_bin}${workbook_st131_env}" \
+    "$export_results_workbook_pbs_script" \
+    "${PBS_LOG_DIR:-}" \
+    "${PBS_MAIL_OPTIONS:-}" \
+    "${PBS_MAIL_USER:-}")
   log "INFO" "Results workbook job ${workbook_job_id}: ${results_workbook_output}"
 fi
 

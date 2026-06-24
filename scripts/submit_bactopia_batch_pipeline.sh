@@ -49,9 +49,9 @@ Environment variables:
   CONSOLIDATED_OUTDIR     Default: <results_root>/<batch_prefix>_consolidated
   BASE_DIR                Default: repo root above this script
   SAMPLESHEET_DIR         Override batch sheet directory used by run_bactopia_batch.pbs
-  PBS_LOG_DIR             Optional directory for qsub .o/.e files
-  PBS_MAIL_OPTIONS        Optional qsub -m value, for example ae or abe
-  PBS_MAIL_USER           Optional qsub -M email address for PBS notifications
+  PBS_LOG_DIR             Optional directory for scheduler stdout/stderr files
+  PBS_MAIL_OPTIONS        Optional PBS-style mail flags, for example ae or abe
+  PBS_MAIL_USER           Optional email address for scheduler notifications
 
 Example:
   BATCH_SKIP=0 \
@@ -89,6 +89,8 @@ input_file=$1
 batch_size=$2
 
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck disable=SC1091
+source "$script_dir/lib_scheduler.sh"
 
 BATCH_PREFIX=${BATCH_PREFIX:-batch_bactopia}
 BATCH_DIR=${BATCH_DIR:-$(dirname "$input_file")/batches}
@@ -134,18 +136,6 @@ KLEBORATE_COMPAT_SCRIPT=${KLEBORATE_COMPAT_SCRIPT:-$script_dir/kleborate_232_com
 PBS_LOG_DIR=${PBS_LOG_DIR:-}
 PBS_MAIL_OPTIONS=${PBS_MAIL_OPTIONS:-}
 PBS_MAIL_USER=${PBS_MAIL_USER:-}
-
-qsub_log_args=()
-if [[ -n $PBS_LOG_DIR ]]; then
-  mkdir -p "$PBS_LOG_DIR"
-  qsub_log_args=(-o "$PBS_LOG_DIR" -e "$PBS_LOG_DIR")
-fi
-if [[ -n $PBS_MAIL_OPTIONS ]]; then
-  qsub_log_args+=(-m "$PBS_MAIL_OPTIONS")
-fi
-if [[ -n $PBS_MAIL_USER ]]; then
-  qsub_log_args+=(-M "$PBS_MAIL_USER")
-fi
 
 if [[ ! -f $input_file ]]; then
   echo "Input file not found: $input_file" >&2
@@ -312,25 +302,19 @@ for batch_file in "${selected_batch_files[@]}"; do
   kleborate_job_name=$(printf 'klebo_b%s' "$batch_id")
   fimtyper_job_name=$(printf 'fimtyper_b%s' "$batch_id")
 
-  assembly_qsub_args=(
-    -N "$assembly_job_name"
-  )
-
-  if [[ ${#qsub_log_args[@]} -gt 0 ]]; then
-    assembly_qsub_args+=("${qsub_log_args[@]}")
-  fi
-
+  assembly_dependency=
   if [[ $BATCH_CHAIN == 1 && -n "$previous_batch_terminal_job" ]]; then
-    assembly_qsub_args+=(-W "depend=afterok:${previous_batch_terminal_job}")
+    assembly_dependency=$previous_batch_terminal_job
   fi
 
-  assembly_qsub_args+=(
-    -v "BASE_DIR=${BASE_DIR},SAMPLESHEET_DIR=${SAMPLESHEET_DIR},SAMPLESHEET_PREFIX=${BATCH_PREFIX},BATCH_ID=${batch_id},BATCH_INPUT_FILE=${batch_file},RESULTS_ROOT=${RESULTS_ROOT},NEXTFLOW_CONFIG=${NEXTFLOW_CONFIG},BACTOPIA_PIPELINE=${BACTOPIA_PIPELINE},DATASETS_CACHE=${DATASETS_CACHE},SING_CACHE=${SING_CACHE}"
-    "$script_dir/run_bactopia_batch.pbs"
-  )
-
-  assembly_job=$(qsub "${assembly_qsub_args[@]}")
-  assembly_job=${assembly_job%%.*}
+  assembly_job=$(scheduler_submit \
+    "$assembly_job_name" \
+    "$assembly_dependency" \
+    "BASE_DIR=${BASE_DIR},SAMPLESHEET_DIR=${SAMPLESHEET_DIR},SAMPLESHEET_PREFIX=${BATCH_PREFIX},BATCH_ID=${batch_id},BATCH_INPUT_FILE=${batch_file},RESULTS_ROOT=${RESULTS_ROOT},NEXTFLOW_CONFIG=${NEXTFLOW_CONFIG},BACTOPIA_PIPELINE=${BACTOPIA_PIPELINE},DATASETS_CACHE=${DATASETS_CACHE},SING_CACHE=${SING_CACHE}" \
+    "$script_dir/run_bactopia_batch.pbs" \
+    "$PBS_LOG_DIR" \
+    "$PBS_MAIL_OPTIONS" \
+    "$PBS_MAIL_USER")
   echo "${run_label}: assembly job ${assembly_job}"
   assembly_jobs+=("${assembly_job}")
 
@@ -339,20 +323,26 @@ for batch_file in "${selected_batch_files[@]}"; do
   kleborate_job=
 
   if [[ $RUN_TOOLS != 0 ]]; then
-    tools_job=$(qsub "${qsub_log_args[@]}" -N "$tools_job_name" \
-      -W "depend=afterok:${assembly_job}" \
-      -v "BASE_DIR=${BASE_DIR},RESULTS_MAIN=${results_main},RUN_LABEL=${run_label}_tools,RESULTS_OUT=${tools_outdir},RESULTS_ROOT=${RESULTS_ROOT},TOOLS_STRING=${TOOLS_STRING},KRAKEN2_DB=${KRAKEN2_DB},MYKROBE_SPECIES=${MYKROBE_SPECIES},DEFENSEFINDER_DB=${DEFENSEFINDER_DB},NEXTFLOW_CONFIG=${NEXTFLOW_CONFIG},BACTOPIA_PIPELINE=${BACTOPIA_PIPELINE},DATASETS_CACHE=${DATASETS_CACHE},SING_CACHE=${SING_CACHE}" \
-      "$script_dir/run_extra_bactopia_tools.pbs")
-    tools_job=${tools_job%%.*}
+    tools_job=$(scheduler_submit \
+      "$tools_job_name" \
+      "$assembly_job" \
+      "BASE_DIR=${BASE_DIR},RESULTS_MAIN=${results_main},RUN_LABEL=${run_label}_tools,RESULTS_OUT=${tools_outdir},RESULTS_ROOT=${RESULTS_ROOT},TOOLS_STRING=${TOOLS_STRING},KRAKEN2_DB=${KRAKEN2_DB},MYKROBE_SPECIES=${MYKROBE_SPECIES},DEFENSEFINDER_DB=${DEFENSEFINDER_DB},NEXTFLOW_CONFIG=${NEXTFLOW_CONFIG},BACTOPIA_PIPELINE=${BACTOPIA_PIPELINE},DATASETS_CACHE=${DATASETS_CACHE},SING_CACHE=${SING_CACHE}" \
+      "$script_dir/run_extra_bactopia_tools.pbs" \
+      "$PBS_LOG_DIR" \
+      "$PBS_MAIL_OPTIONS" \
+      "$PBS_MAIL_USER")
     echo "${run_label}: non-kleborate tools job ${tools_job}"
   fi
 
   if [[ $RUN_KLEBORATE != 0 ]]; then
-    kleborate_job=$(qsub "${qsub_log_args[@]}" -N "$kleborate_job_name" \
-      -W "depend=afterok:${assembly_job}" \
-      -v "BASE_DIR=${BASE_DIR},RESULTS_MAIN=${results_main},RUN_LABEL=${run_label}_kleborate,RESULTS_OUT=${kleborate_outdir},RESULTS_ROOT=${RESULTS_ROOT},NEXTFLOW_CONFIG=${NEXTFLOW_CONFIG},BACTOPIA_PIPELINE=${BACTOPIA_PIPELINE},DATASETS_CACHE=${DATASETS_CACHE},SING_CACHE=${SING_CACHE},KLEBORATE_COMPAT_SCRIPT=${KLEBORATE_COMPAT_SCRIPT}" \
-      "$script_dir/run_kleborate_batch.pbs")
-    kleborate_job=${kleborate_job%%.*}
+    kleborate_job=$(scheduler_submit \
+      "$kleborate_job_name" \
+      "$assembly_job" \
+      "BASE_DIR=${BASE_DIR},RESULTS_MAIN=${results_main},RUN_LABEL=${run_label}_kleborate,RESULTS_OUT=${kleborate_outdir},RESULTS_ROOT=${RESULTS_ROOT},NEXTFLOW_CONFIG=${NEXTFLOW_CONFIG},BACTOPIA_PIPELINE=${BACTOPIA_PIPELINE},DATASETS_CACHE=${DATASETS_CACHE},SING_CACHE=${SING_CACHE},KLEBORATE_COMPAT_SCRIPT=${KLEBORATE_COMPAT_SCRIPT}" \
+      "$script_dir/run_kleborate_batch.pbs" \
+      "$PBS_LOG_DIR" \
+      "$PBS_MAIL_OPTIONS" \
+      "$PBS_MAIL_USER")
     echo "${run_label}: kleborate job ${kleborate_job}"
   fi
 
@@ -389,11 +379,14 @@ for batch_file in "${selected_batch_files[@]}"; do
   fi
 
   if [[ $RUN_FIMTYPER != 0 ]]; then
-    fimtyper_job=$(qsub "${qsub_log_args[@]}" -N "$fimtyper_job_name" \
-      -W "depend=afterok:${dependency_job}" \
-      -v "BASE_DIR=${BASE_DIR},RESULTS_MAIN=${results_main},RUN_LABEL=${run_label}_fimtyper,RESULTS_OUT=${fimtyper_outdir},RESULTS_ROOT=${RESULTS_ROOT},FIMTYPER_PIPELINE=${FIMTYPER_PIPELINE},FIMTYPER_CONFIG=${FIMTYPER_CONFIG},MERGE_FIMTYPER_SCRIPT=${MERGE_FIMTYPER_SCRIPT},FIMTYPER_PROFILE=${FIMTYPER_PROFILE},SING_CACHE=${SING_CACHE}" \
-      "$script_dir/run_fimtyper_batch.pbs")
-    fimtyper_job=${fimtyper_job%%.*}
+    fimtyper_job=$(scheduler_submit \
+      "$fimtyper_job_name" \
+      "$dependency_job" \
+      "BASE_DIR=${BASE_DIR},RESULTS_MAIN=${results_main},RUN_LABEL=${run_label}_fimtyper,RESULTS_OUT=${fimtyper_outdir},RESULTS_ROOT=${RESULTS_ROOT},FIMTYPER_PIPELINE=${FIMTYPER_PIPELINE},FIMTYPER_CONFIG=${FIMTYPER_CONFIG},MERGE_FIMTYPER_SCRIPT=${MERGE_FIMTYPER_SCRIPT},FIMTYPER_PROFILE=${FIMTYPER_PROFILE},SING_CACHE=${SING_CACHE}" \
+      "$script_dir/run_fimtyper_batch.pbs" \
+      "$PBS_LOG_DIR" \
+      "$PBS_MAIL_OPTIONS" \
+      "$PBS_MAIL_USER")
     echo "${run_label}: fimtyper job ${fimtyper_job}"
     dependency_job=$fimtyper_job
   fi
@@ -404,10 +397,14 @@ done
 
 if [[ $RUN_COLLECT_ASSEMBLIES != 0 && ${#assembly_jobs[@]} -gt 0 ]]; then
   dependency_string=$(IFS=:; echo "${assembly_jobs[*]}")
-  assemblies_job=$(qsub "${qsub_log_args[@]}" -W "depend=afterok:${dependency_string}" \
-    -v "INPUT_PATH=${RESULTS_ROOT},OUTPUT_DIR=${ASSEMBLIES_OUTDIR}" \
-    "$script_dir/run_fetch_batch_assemblies.pbs")
-  assemblies_job=${assemblies_job%%.*}
+  assemblies_job=$(scheduler_submit \
+    "" \
+    "$dependency_string" \
+    "INPUT_PATH=${RESULTS_ROOT},OUTPUT_DIR=${ASSEMBLIES_OUTDIR}" \
+    "$script_dir/run_fetch_batch_assemblies.pbs" \
+    "$PBS_LOG_DIR" \
+    "$PBS_MAIL_OPTIONS" \
+    "$PBS_MAIL_USER")
   echo "assemblies job ${assemblies_job}: ${ASSEMBLIES_OUTDIR}"
 fi
 
@@ -416,18 +413,26 @@ if [[ $RUN_ST131_TYPER != 0 ]]; then
     echo "RUN_ST131_TYPER=1 requires RUN_COLLECT_ASSEMBLIES=1 so the assemblies folder can be created first." >&2
     exit 1
   fi
-  st131typer_job=$(qsub "${qsub_log_args[@]}" -W "depend=afterok:${assemblies_job}" \
-    -v "ASSEMBLIES_DIR=${ST131_TYPER_INPUT_DIR},RESULTS_ROOT=${RESULTS_ROOT},ST131_TYPER_SCRIPT=${ST131_TYPER_SCRIPT},ST131_TYPER_OUTPUT_DIR=${ST131_TYPER_OUTPUT_DIR}" \
-    "$ST131_TYPER_PBS_SCRIPT")
-  st131typer_job=${st131typer_job%%.*}
+  st131typer_job=$(scheduler_submit \
+    "" \
+    "$assemblies_job" \
+    "ASSEMBLIES_DIR=${ST131_TYPER_INPUT_DIR},RESULTS_ROOT=${RESULTS_ROOT},ST131_TYPER_SCRIPT=${ST131_TYPER_SCRIPT},ST131_TYPER_OUTPUT_DIR=${ST131_TYPER_OUTPUT_DIR}" \
+    "$ST131_TYPER_PBS_SCRIPT" \
+    "$PBS_LOG_DIR" \
+    "$PBS_MAIL_OPTIONS" \
+    "$PBS_MAIL_USER")
   echo "st131typer job ${st131typer_job}: ${ST131_TYPER_OUTPUT_DIR}"
 fi
 
 if [[ $RUN_CONSOLIDATE != 0 && ${#terminal_jobs[@]} -gt 0 ]]; then
   dependency_string=$(IFS=:; echo "${terminal_jobs[*]}")
-  consolidate_job=$(qsub "${qsub_log_args[@]}" -W "depend=afterok:${dependency_string}" \
-    -v "BASE_DIR=${BASE_DIR},RESULTS_ROOT=${RESULTS_ROOT},BATCH_PREFIX=${BATCH_PREFIX},CONSOLIDATED_OUTDIR=${CONSOLIDATED_OUTDIR},CONSOLIDATE_SCRIPT=${script_dir}/consolidate_bactopia_batches.R" \
-    "$script_dir/run_consolidate_batches.pbs")
-  consolidate_job=${consolidate_job%%.*}
+  consolidate_job=$(scheduler_submit \
+    "" \
+    "$dependency_string" \
+    "BASE_DIR=${BASE_DIR},RESULTS_ROOT=${RESULTS_ROOT},BATCH_PREFIX=${BATCH_PREFIX},CONSOLIDATED_OUTDIR=${CONSOLIDATED_OUTDIR},CONSOLIDATE_SCRIPT=${script_dir}/consolidate_bactopia_batches.R" \
+    "$script_dir/run_consolidate_batches.pbs" \
+    "$PBS_LOG_DIR" \
+    "$PBS_MAIL_OPTIONS" \
+    "$PBS_MAIL_USER")
   echo "consolidation job ${consolidate_job}: ${CONSOLIDATED_OUTDIR}"
 fi

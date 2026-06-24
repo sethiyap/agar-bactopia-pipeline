@@ -9,6 +9,8 @@ Usage:
   ./bin/agar-bactopia submit gadi --additional-tools yes RAW_FASTQ_DIR METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
   ./bin/agar-bactopia submit gadi --is-agar-project 0 RAW_FASTQ_DIR METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
   ./bin/agar-bactopia submit gadi --mail-user you@example.org [--mail-options ae] RAW_FASTQ_DIR METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
+  ./bin/agar-bactopia submit slurm RAW_FASTQ_DIR METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
+  ./bin/agar-bactopia submit slurm --site-config config/sites/slurm.local.env RAW_FASTQ_DIR METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
 EOF
 }
 
@@ -27,6 +29,9 @@ shift 2
 case "$command:$backend" in
   submit:gadi)
     exec "$project_root/wrappers/submit.gadi.sh" "$@"
+    ;;
+  submit:slurm)
+    exec "$project_root/wrappers/submit.slurm.sh" "$@"
     ;;
   *)
     usage >&2

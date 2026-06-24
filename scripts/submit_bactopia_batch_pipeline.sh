@@ -12,7 +12,9 @@ Environment variables:
   BATCH_DIR               Default: <input_dir>/batches
   BATCH_SKIP              Default: 0
   BATCH_START             Optional 1-based batch number to start from, e.g. 3
-  BATCH_LIMIT             Default: 2
+  BATCH_LIMIT             Optional explicit maximum number of batch files to
+                          submit. Default: all batch files implied by the FOFN
+                          and BATCH_SIZE
   BATCH_CHAIN             Default: 0
   BATCH_IDS               Optional comma-separated batch ids or labels to run,
                           for example 001 or batch_bactopia_001
@@ -96,7 +98,7 @@ BATCH_PREFIX=${BATCH_PREFIX:-batch_bactopia}
 BATCH_DIR=${BATCH_DIR:-$(dirname "$input_file")/batches}
 BATCH_SKIP=${BATCH_SKIP:-0}
 BATCH_START=${BATCH_START:-}
-BATCH_LIMIT=${BATCH_LIMIT:-2}
+BATCH_LIMIT=${BATCH_LIMIT:-}
 BATCH_CHAIN=${BATCH_CHAIN:-0}
 BATCH_IDS=${BATCH_IDS:-}
 RUN_TOOLS=${RUN_TOOLS:-1}
@@ -157,7 +159,7 @@ if [[ -n $BATCH_START ]] && ! [[ $BATCH_START =~ ^[1-9][0-9]*$ ]]; then
   exit 1
 fi
 
-if ! [[ $BATCH_LIMIT =~ ^[1-9][0-9]*$ ]]; then
+if [[ -n $BATCH_LIMIT ]] && ! [[ $BATCH_LIMIT =~ ^[1-9][0-9]*$ ]]; then
   echo "BATCH_LIMIT must be a positive integer: $BATCH_LIMIT" >&2
   exit 1
 fi
@@ -266,7 +268,13 @@ else
   if [[ -n $BATCH_START ]]; then
     batch_offset=$((10#$BATCH_START - 1))
   fi
-  selected_batch_files=("${batch_files[@]:$batch_offset:$BATCH_LIMIT}")
+
+  if [[ -n $BATCH_LIMIT ]]; then
+    selected_batch_files=("${batch_files[@]:$batch_offset:$BATCH_LIMIT}")
+  else
+    selected_batch_files=("${batch_files[@]:$batch_offset}")
+    BATCH_LIMIT=${#selected_batch_files[@]}
+  fi
 fi
 
 if [[ ${#selected_batch_files[@]} -eq 0 ]]; then

@@ -471,6 +471,11 @@ In `POSTPROCESS_ONLY=1` mode, the trailing `50` does not limit the work to 50
 samples. Consolidation runs across all batch directories already present under
 the selected `RESULTS_ROOT`.
 
+If you do not set `BATCH_LIMIT`, the launcher now submits all batch files
+implied by `samplesheet.fofn` and `BATCH_SIZE`. For example, about 284 samples
+at `BATCH_SIZE=50` yields 6 batch files, and about 150 samples yields 3 batch
+files.
+
 The launcher now runs an inode preflight against `RESULTS_ROOT` before
 submission. On Gadi scratch it checks filesystem inode headroom and also looks
 for project scratch quota issues via `lquota` or `nci_account`. Set
@@ -499,7 +504,8 @@ How to get rid of an inode overload error on Gadi:
 For retry work on a specific batch or subset, the batch submitter accepts:
 
 - `BATCH_START` for a 1-based starting batch number
-- `BATCH_LIMIT` for how many batches to submit from that point
+- `BATCH_LIMIT` for how many batches to submit from that point when you want a
+  smaller subset than the default all-batches behavior
 - `BATCH_IDS` for an exact comma-separated subset such as `001` or
   `batch_bactopia_001,batch_bactopia_004`
 

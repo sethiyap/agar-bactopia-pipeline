@@ -69,6 +69,59 @@ Then test the entrypoints:
 For other servers, keep the same repo layout and add a site config plus wrapper
 for that scheduler/backend, for example `slurm`.
 
+## Optional Tool Installs For Non-Gadi Or Non-`rg42` Sites
+
+If you are not using the shared `rg42` Gadi install, the clone alone is not
+enough to provide every external helper. The repo does not auto-install these
+tools on clone; install them only if they are not already available at your
+site.
+
+Standalone MLST review helper:
+
+- `run_review_mlst_from_tsv.sh` expects a Miniforge/Conda activation root via
+  `MINIFORGE_ROOT`
+- the activated environment at `MLST_ENV` must provide both `mlst` and `seqkit`
+- on `rg42` Gadi these usually point at the shared
+  `/g/data/<PROJECT>/bactopia_datasets/miniforge3` and
+  `/g/data/<PROJECT>/bactopia_datasets/envs/mlst_env`
+
+Example Miniforge + MLST environment setup on a generic Linux host:
+
+```bash
+MINIFORGE_ROOT=$PWD/miniforge3
+MLST_ENV=$PWD/mlst_env
+
+mkdir -p "$MINIFORGE_ROOT"
+curl -L -o /tmp/Miniforge3.sh \
+  https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh
+bash /tmp/Miniforge3.sh -b -p "$MINIFORGE_ROOT"
+
+source "$MINIFORGE_ROOT/etc/profile.d/conda.sh"
+conda create -y -p "$MLST_ENV" -c conda-forge -c bioconda mlst seqkit
+conda activate "$MLST_ENV"
+
+mlst --version
+seqkit version
+```
+
+ST131Typer helper:
+
+- the ST131Typer steps do not bundle `ST131Typer.sh`
+- by default the launchers expect it at `<repo_root>/ST131Typer.sh`
+- if you keep it elsewhere, set `ST131_TYPER_SCRIPT=/absolute/path/to/ST131Typer.sh`
+- if the ST131Typer script itself depends on `seqkit`, make sure the same shell
+  or Conda environment used to run ST131Typer has `seqkit` on `PATH`
+
+Minimal verification for non-`rg42` installs:
+
+```bash
+test -f /absolute/path/to/ST131Typer.sh
+source "$MINIFORGE_ROOT/etc/profile.d/conda.sh"
+conda activate "$MLST_ENV"
+command -v mlst
+command -v seqkit
+```
+
 ## Current backend
 
 - `gadi` submit wrapper

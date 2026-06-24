@@ -41,9 +41,19 @@ These are not bundled in the repo and must exist on the execution site.
 - Conda / Miniforge install used by the standalone MLST review helper:
   - `MINIFORGE_ROOT`
   - `MLST_ENV`
+  - `mlst`
+  - `seqkit`
+- ST131Typer helper script used by the optional ST131Typer steps:
+  - `ST131Typer.sh`
 - Python environment for final workbook export:
   - `python3`
   - `openpyxl`
+
+For non-Gadi or non-`rg42` installs, these helpers are not installed by cloning
+this repo. Install them only if they are not already available on the target
+site, then point the wrappers at the correct paths via environment variables
+such as `MINIFORGE_ROOT`, `MLST_ENV`, and `ST131_TYPER_SCRIPT`.
+
 ## MLST Review Workflow
 
 The packaged workflow includes a phenotype-guided MLST review stage.

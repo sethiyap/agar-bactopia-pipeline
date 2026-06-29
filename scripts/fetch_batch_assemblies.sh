@@ -38,6 +38,7 @@ Notes:
     `batch_bactopia_002`, ...
   - Otherwise, if it is a parent directory, the script recursively searches for
     `<batch_prefix>_NNN/results_main` beneath it.
+  - Reruns overwrite any existing `*.fna` or `*.fna.gz` files in OUTPUT_DIR.
 EOF
 }
 
@@ -151,13 +152,12 @@ for assembly in "${assembly_files[@]}"; do
   dest_fna=${dest_gz%.gz}
 
   if [[ -e $dest_gz || -e $dest_fna ]]; then
-    echo "Destination file already exists, refusing to overwrite: $dest_gz" >&2
-    exit 1
+    log "Overwriting existing assembly: $(basename "$dest_fna")"
   fi
 
-  cp "$assembly" "$dest_gz"
+  cp -f "$assembly" "$dest_gz"
   copied_count=$((copied_count + 1))
-  gunzip "$dest_gz"
+  gunzip -f "$dest_gz"
   unzipped_count=$((unzipped_count + 1))
   log "Copied and unzipped: $(basename "$dest_fna")"
 done

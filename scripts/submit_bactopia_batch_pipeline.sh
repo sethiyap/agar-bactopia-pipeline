@@ -19,6 +19,9 @@ Environment variables:
   BATCH_IDS               Optional comma-separated batch ids or labels to run,
                           for example 001 or batch_bactopia_001
   RUN_TOOLS               Default: 1
+  RUN_TOOLS_PARALLEL      Default: 0. Set to 1 to submit one non-Kleborate
+                          tool job per tool after assembly instead of running
+                          the whole tool bundle sequentially in one job
   RUN_ADDITIONAL_TOOLS    Default: 0
   DEFAULT_TOOLS_STRING    Default non-Kleborate tool list:
                           abritamr amrfinderplus bracken checkm mlst plasmidfinder
@@ -102,6 +105,7 @@ BATCH_LIMIT=${BATCH_LIMIT:-}
 BATCH_CHAIN=${BATCH_CHAIN:-0}
 BATCH_IDS=${BATCH_IDS:-}
 RUN_TOOLS=${RUN_TOOLS:-1}
+RUN_TOOLS_PARALLEL=${RUN_TOOLS_PARALLEL:-0}
 RUN_ADDITIONAL_TOOLS=${RUN_ADDITIONAL_TOOLS:-0}
 DEFAULT_TOOLS_STRING=${DEFAULT_TOOLS_STRING:-abritamr amrfinderplus bracken checkm mlst plasmidfinder}
 ADDITIONAL_TOOLS_STRING=${ADDITIONAL_TOOLS_STRING:-defensefinder ectyper ismapper mashdist mobsuite mykrobe phispy shigapass shigatyper shigeifinder}
@@ -171,6 +175,11 @@ fi
 
 if [[ ${RUN_ADDITIONAL_TOOLS:-0} != 0 && ${RUN_ADDITIONAL_TOOLS:-0} != 1 ]]; then
   echo "RUN_ADDITIONAL_TOOLS must be 0 or 1: ${RUN_ADDITIONAL_TOOLS}" >&2
+  exit 1
+fi
+
+if [[ ${RUN_TOOLS_PARALLEL:-0} != 0 && ${RUN_TOOLS_PARALLEL:-0} != 1 ]]; then
+  echo "RUN_TOOLS_PARALLEL must be 0 or 1: ${RUN_TOOLS_PARALLEL}" >&2
   exit 1
 fi
 
@@ -328,18 +337,48 @@ for batch_file in "${selected_batch_files[@]}"; do
 
   dependency_job=$assembly_job
   tools_job=
+  tools_jobs=()
   kleborate_job=
 
   if [[ $RUN_TOOLS != 0 ]]; then
-    tools_job=$(scheduler_submit \
-      "$tools_job_name" \
-      "$assembly_job" \
-      "BASE_DIR=${BASE_DIR},RESULTS_MAIN=${results_main},RUN_LABEL=${run_label}_tools,RESULTS_OUT=${tools_outdir},RESULTS_ROOT=${RESULTS_ROOT},TOOLS_STRING=${TOOLS_STRING},KRAKEN2_DB=${KRAKEN2_DB},MYKROBE_SPECIES=${MYKROBE_SPECIES},DEFENSEFINDER_DB=${DEFENSEFINDER_DB},NEXTFLOW_CONFIG=${NEXTFLOW_CONFIG},BACTOPIA_PIPELINE=${BACTOPIA_PIPELINE},DATASETS_CACHE=${DATASETS_CACHE},SING_CACHE=${SING_CACHE}" \
-      "$script_dir/run_extra_bactopia_tools.pbs" \
-      "$PBS_LOG_DIR" \
-      "$PBS_MAIL_OPTIONS" \
-      "$PBS_MAIL_USER")
-    echo "${run_label}: non-kleborate tools job ${tools_job}"
+    if [[ $RUN_TOOLS_PARALLEL != 0 ]]; then
+      for tool in "${TOOLS_LIST[@]}"; do
+        if [[ $tool == "kleborate" ]]; then
+          echo "${run_label}: skipping kleborate in parallel non-kleborate tool submission; use RUN_KLEBORATE." >&2
+          continue
+        fi
+
+        tool_tag=${tool//[^A-Za-z0-9]/_}
+        tool_tag=${tool_tag:0:8}
+        parallel_tool_job_name=$(printf 'tb%s_%s' "$batch_id" "$tool_tag")
+        parallel_tool_run_label="${run_label}_tools_${tool}"
+
+        tool_job_id=$(scheduler_submit \
+          "$parallel_tool_job_name" \
+          "$assembly_job" \
+          "BASE_DIR=${BASE_DIR},RESULTS_MAIN=${results_main},RUN_LABEL=${parallel_tool_run_label},RESULTS_OUT=${tools_outdir},RESULTS_ROOT=${RESULTS_ROOT},TOOLS_STRING=${tool},KRAKEN2_DB=${KRAKEN2_DB},MYKROBE_SPECIES=${MYKROBE_SPECIES},DEFENSEFINDER_DB=${DEFENSEFINDER_DB},NEXTFLOW_CONFIG=${NEXTFLOW_CONFIG},BACTOPIA_PIPELINE=${BACTOPIA_PIPELINE},DATASETS_CACHE=${DATASETS_CACHE},SING_CACHE=${SING_CACHE}" \
+          "$script_dir/run_extra_bactopia_tools.pbs" \
+          "$PBS_LOG_DIR" \
+          "$PBS_MAIL_OPTIONS" \
+          "$PBS_MAIL_USER")
+        tools_jobs+=("$tool_job_id")
+        echo "${run_label}: tool ${tool} job ${tool_job_id}"
+      done
+
+      if [[ ${#tools_jobs[@]} -gt 0 ]]; then
+        tools_job=$(IFS=:; echo "${tools_jobs[*]}")
+      fi
+    else
+      tools_job=$(scheduler_submit \
+        "$tools_job_name" \
+        "$assembly_job" \
+        "BASE_DIR=${BASE_DIR},RESULTS_MAIN=${results_main},RUN_LABEL=${run_label}_tools,RESULTS_OUT=${tools_outdir},RESULTS_ROOT=${RESULTS_ROOT},TOOLS_STRING=${TOOLS_STRING},KRAKEN2_DB=${KRAKEN2_DB},MYKROBE_SPECIES=${MYKROBE_SPECIES},DEFENSEFINDER_DB=${DEFENSEFINDER_DB},NEXTFLOW_CONFIG=${NEXTFLOW_CONFIG},BACTOPIA_PIPELINE=${BACTOPIA_PIPELINE},DATASETS_CACHE=${DATASETS_CACHE},SING_CACHE=${SING_CACHE}" \
+        "$script_dir/run_extra_bactopia_tools.pbs" \
+        "$PBS_LOG_DIR" \
+        "$PBS_MAIL_OPTIONS" \
+        "$PBS_MAIL_USER")
+      echo "${run_label}: non-kleborate tools job ${tools_job}"
+    fi
   fi
 
   if [[ $RUN_KLEBORATE != 0 ]]; then

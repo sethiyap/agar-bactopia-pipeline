@@ -225,6 +225,38 @@ Enable the additional tools bundle:
   50
 ```
 
+The public submission command does not change. To control how the non-Kleborate
+tool bundle is submitted, set `RUN_TOOLS_PARALLEL` before the same command:
+
+```bash
+# Faster completion: submit one non-Kleborate tool job per tool in parallel
+RUN_TOOLS_PARALLEL=1 \
+/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
+  /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
+  /scratch/rg42/AGAR/metadata/2025/B07 \
+  /scratch/rg42/AGAR/intermediates/2025/B07 \
+  50
+
+# Lower scheduler load: keep the existing sequential bundled-tools behavior
+RUN_TOOLS_PARALLEL=0 \
+/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
+  /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
+  /scratch/rg42/AGAR/metadata/2025/B07 \
+  /scratch/rg42/AGAR/intermediates/2025/B07 \
+  50
+```
+
+Behavior:
+
+- `RUN_TOOLS_PARALLEL=1`
+  For faster completion, each non-Kleborate tool is submitted as its own job
+  after assembly. The final output layout stays the same, with per-tool logs
+  under `<run_label>_tools/logs/<tool>/`.
+- `RUN_TOOLS_PARALLEL=0`
+  The existing behavior. One tools job runs the whole non-Kleborate tool bundle
+  sequentially.
+- If `RUN_TOOLS_PARALLEL` is unset, the default is `0`.
+
 Force non-AGAR mode for mixed or non-AGAR folders:
 
 ```bash

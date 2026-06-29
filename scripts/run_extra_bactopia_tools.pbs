@@ -101,6 +101,7 @@ fi
 for tool in "${TOOLS[@]}"; do
   TOOL_OUTDIR="results_${tool}"
   TOOL_WORKDIR="${NXF_WORK}/${tool}"
+  TOOL_LOG_DIR="${RESULTS_OUT}/logs/${tool}"
   EXTRA_ARGS=()
 
   case "$tool" in
@@ -130,6 +131,7 @@ for tool in "${TOOLS[@]}"; do
     continue
   fi
 
+  rm -f .nextflow.log*
   echo "Running ${tool}"
   nextflow run "$BACTOPIA_PIPELINE" \
     --wf "$tool" \
@@ -140,8 +142,8 @@ for tool in "${TOOLS[@]}"; do
     "${EXTRA_ARGS[@]}"
 
   rsync -av "${TOOL_OUTDIR}/" "${RESULTS_OUT}/${TOOL_OUTDIR}/"
+  mkdir -p "$TOOL_LOG_DIR"
+  if compgen -G ".nextflow.log*" > /dev/null; then
+    rsync -av .nextflow.log* "${TOOL_LOG_DIR}/"
+  fi
 done
-
-if compgen -G ".nextflow.log*" > /dev/null; then
-  rsync -av .nextflow.log* "$RESULTS_OUT/"
-fi

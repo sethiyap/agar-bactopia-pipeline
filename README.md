@@ -28,6 +28,71 @@ needed in routine use:
 So `agar-bactopia-pipeline` is best understood as an AGAR-compatible
 distribution of Bactopia rather than a completely separate biological pipeline.
 
+## Access On Gadi
+
+Log in to Gadi with your NCI account, then move into the shared pipeline
+install and AGAR working areas:
+
+```bash
+ssh <nci_username>@gadi.nci.org.au
+
+cd /g/data/rg42/agar-bactopia-pipeline
+
+# AGAR raw data, metadata, and intermediate processing roots
+cd /scratch/rg42/AGAR
+ls
+```
+
+Key Gadi paths used by this pipeline:
+
+- pipeline code: `/g/data/rg42/agar-bactopia-pipeline`
+- AGAR raw data root: `/scratch/rg42/AGAR/raw_data`
+- AGAR metadata root: `/scratch/rg42/AGAR/metadata`
+- AGAR intermediate processing root: `/scratch/rg42/AGAR/intermediates`
+
+Typical Gadi workflow:
+
+- log in to Gadi
+- inspect or update the shared pipeline under `/g/data/rg42/agar-bactopia-pipeline`
+- optionally download a new AGRF delivery into `/scratch/rg42/AGAR/raw_data/...`
+- read batch inputs from `/scratch/rg42/AGAR/raw_data/...`
+- read metadata from `/scratch/rg42/AGAR/metadata/...`
+- write processing outputs under `/scratch/rg42/AGAR/intermediates/...`
+
+Download AGRF raw data onto Gadi:
+
+The AGRF download helper defaults to `/scratch/rg42/AGAR/raw_data`, but that
+raw-data destination root is configurable with `DEST_ROOT`.
+
+```bash
+cd /g/data/rg42/agar-bactopia-pipeline
+
+./scripts/download_agrf_to_gadi.sh \
+  user@source.example.org:/path/to/AGRF_CAGRF26050180_AAHJ2FTM5 \
+  2025 \
+  B07
+```
+
+That command creates:
+
+```bash
+/scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5
+```
+
+Notes:
+
+- `REMOTE_SPEC` must be an rsync-compatible source such as
+  `user@host:/path/to/delivery`
+- the default destination root is `/scratch/rg42/AGAR/raw_data`
+- if you want a different raw-data root, override `DEST_ROOT` with an absolute
+  path, for example:
+  `DEST_ROOT=/scratch/rg42/my_project/raw_data ./scripts/download_agrf_to_gadi.sh ...`
+- if the source needs a custom SSH port or options, set `RSYNC_RSH`, for
+  example `RSYNC_RSH="ssh -p 2222"`
+- set `DRY_RUN=1` first if you want to preview the transfer
+- the script is intended for raw-data delivery downloads only; metadata still
+  belongs under `/scratch/rg42/AGAR/metadata/...`
+
 ## Clone And Install On A Server
 
 Example shared install on Gadi:

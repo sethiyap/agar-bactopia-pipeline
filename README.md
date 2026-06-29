@@ -30,6 +30,8 @@ distribution of Bactopia rather than a completely separate biological pipeline.
 
 ## Access On Gadi
 
+### Connecting To Gadi
+
 Log in to Gadi with your NCI account, then move into the shared pipeline
 install and AGAR working areas:
 
@@ -58,6 +60,8 @@ Typical Gadi workflow:
 - read batch inputs from `/scratch/rg42/AGAR/raw_data/...`
 - read metadata from `/scratch/rg42/AGAR/metadata/...`
 - write processing outputs under `/scratch/rg42/AGAR/intermediates/...`
+
+### Downloading Data From AGRF
 
 Download AGRF raw data onto Gadi:
 
@@ -92,8 +96,61 @@ Notes:
 - set `DRY_RUN=1` first if you want to preview the transfer
 - the script is intended for raw-data delivery downloads only; metadata still
   belongs under `/scratch/rg42/AGAR/metadata/...`
+- the metadata directory should contain a text file matching
+  `*_samplesheet.txt`
+- that metadata sheet must contain the columns `Sample name` and `Comments`
+- `Sample name` must match the final sample ids used in the FOFN
+- `Comments` should include the species name or other phenotype text used by
+  the downstream review and mapping steps
 
-## Clone And Install On A Server
+## Metadata Sheet Requirements
+
+The submit wrapper expects exactly one metadata sheet matching
+`*_samplesheet.txt` under `METADATA_DIR`, unless you set `AGRF_SHEET_PATH`
+explicitly.
+
+The default batch family prefix is now `batch_bactopia`, so batch outputs are
+written under paths such as `batch_bactopia_001`,
+`batch_bactopia_001_tools`, and `batch_bactopia_consolidated` unless you
+override `BATCH_PREFIX`.
+
+Required metadata columns:
+
+- `Sample name`: sample identifier used to join metadata back onto the
+  consolidated Bactopia outputs
+- `Comments`: free-text phenotype or lab note field used by the MLST review
+  logic
+
+For non-AGAR projects, sample names are not rewritten by the launcher. When
+`IS_AGAR_PROJECT=0` or auto-detection resolves the input as non-AGAR, the
+wrapper skips `normalize_agar_fastq_sample_names.sh` and goes straight to FOFN
+creation or validation.
+
+For AGAR projects, the built-in FOFN creator keeps only sample prefixes that
+match `AGAR_SAMPLE_REGEX`, reports the skipped sample prefixes, and excludes
+those other FASTQs from `samplesheet.fofn`. The default AGAR regex is
+`^[0-9]{2}GNB-[0-9]+R?$`, so mixed folders do not carry non-AGAR sample names
+forward unless you provide a custom `samplesheet.fofn` or override the regex
+explicitly.
+
+At the public wrapper layer you can force the mode with
+`--is-agar-project auto|1|0`, for example `--is-agar-project 0` for non-AGAR
+or mixed folders that should skip AGAR normalization.
+
+How non-AGAR sample names are managed:
+
+- if the launcher creates `samplesheet.fofn`, the sample name is taken as-is
+  from each FASTQ basename before the first underscore in `*_R1.fastq.gz`
+- if you provide an existing `samplesheet.fofn`, its `sample` values are used
+  as provided
+- in both cases, the metadata `Sample name` column must match the final sample
+  names in the FOFN because no AGAR-specific renaming is applied
+
+All other metadata columns are ignored by the metadata-mapping step. They may
+still be kept in your source sheet for lab bookkeeping, but they are not
+required for downstream processing by this pipeline.
+
+## Installing agar-bactopia-pipeline on Gadi
 
 Example shared install on Gadi:
 
@@ -141,80 +198,26 @@ cp config/sites/slurm.env.example config/sites/slurm.local.env
 
 Edit `config/sites/slurm.local.env` for your site before submitting.
 
-## Optional Tool Installs For Non-Gadi Or Non-`rg42` Sites
+## Quick start on Gadi
 
-If you are not using the shared `rg42` Gadi install, the clone alone is not
-enough to provide every external helper. The repo does not auto-install these
-tools on clone; install them only if they are not already available at your
-site.
-
-Standalone MLST review helper:
-
-- `run_review_mlst_from_tsv.sh` expects a Miniforge/Conda activation root via
-  `MINIFORGE_ROOT`
-- the activated environment at `MLST_ENV` must provide both `mlst` and `seqkit`
-- on `rg42` Gadi these usually point at the shared
-  `/g/data/<PROJECT>/bactopia_datasets/miniforge3` and
-  `/g/data/<PROJECT>/bactopia_datasets/envs/mlst_env`
-
-Example Miniforge + MLST environment setup on a generic Linux host:
+1. Copy the site config:
 
 ```bash
-MINIFORGE_ROOT=$PWD/miniforge3
-MLST_ENV=$PWD/mlst_env
-
-mkdir -p "$MINIFORGE_ROOT"
-curl -L -o /tmp/Miniforge3.sh \
-  https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh
-bash /tmp/Miniforge3.sh -b -p "$MINIFORGE_ROOT"
-
-source "$MINIFORGE_ROOT/etc/profile.d/conda.sh"
-conda create -y -p "$MLST_ENV" -c conda-forge -c bioconda mlst seqkit
-conda activate "$MLST_ENV"
-
-mlst --version
-seqkit version
+cp config/sites/gadi.env.example config/sites/gadi.local.env
 ```
 
-If you want the repo to manage local copies for you, use:
+2. Edit `config/sites/gadi.local.env` if your shared paths differ.
+
+3. Submit:
 
 ```bash
-./scripts/install_optional_local_tools.sh
+cd /home/562/ps1744
+/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
+  /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
+  /scratch/rg42/AGAR/metadata/2025/B07 \
+  /scratch/rg42/AGAR/intermediates/2025/B07 \
+  50
 ```
-
-That helper installs Miniforge under `<repo_root>/.local`, creates a local
-`mlst` + `seqkit` Conda environment, clones
-`https://github.com/JohnsonSingerLab/ST131Typer.git`, and links
-`<repo_root>/ST131Typer.sh` to the cloned script so the existing wrapper
-defaults keep working.
-
-ST131Typer helper:
-
-- the ST131Typer steps do not bundle `ST131Typer.sh`
-- by default the launchers expect it at `<repo_root>/ST131Typer.sh`
-- if you keep it elsewhere, set `ST131_TYPER_SCRIPT=/absolute/path/to/ST131Typer.sh`
-- if the ST131Typer script itself depends on `seqkit`, make sure the same shell
-  or Conda environment used to run ST131Typer has `seqkit` on `PATH`
-
-Minimal verification for non-`rg42` installs:
-
-```bash
-test -f /absolute/path/to/ST131Typer.sh
-source "$MINIFORGE_ROOT/etc/profile.d/conda.sh"
-conda activate "$MLST_ENV"
-command -v mlst
-command -v seqkit
-```
-
-## Packaged Backends
-
-- `gadi`: PBS Pro wrapper and Gadi-oriented shared-path defaults
-- `slurm`: generic Slurm wrapper and Linux-oriented site template
-
-Both backends still assume a Linux execution site with Nextflow plus
-Singularity or Apptainer available. Cloning the repo on macOS is fine for code
-inspection and editing, but the packaged pipeline runners are not a native
-macOS execution target.
 
 ## Submit On Gadi
 
@@ -355,117 +358,6 @@ Override PBS mail settings for one submission:
   /scratch/rg42/AGAR/intermediates/2025/B07 \
   50
 ```
-
-## Submit On Slurm
-
-Public entrypoint:
-
-```bash
-./bin/agar-bactopia submit slurm [OPTIONS] RAW_FASTQ_DIR METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
-```
-
-First-time setup:
-
-```bash
-cp config/sites/slurm.env.example config/sites/slurm.local.env
-```
-
-Edit `config/sites/slurm.local.env` for your site paths, especially:
-
-- `BACTOPIA_PIPELINE`
-- `DATASETS_CACHE`
-- `KRAKEN2_DB`
-- `NEXTFLOW_CONFIG`
-- `FIMTYPER_PIPELINE`
-- `FIMTYPER_CONFIG`
-- `MINIFORGE_ROOT`
-- `MLST_ENV`
-- `SING_CACHE`
-- optional `SLURM_PARTITION`
-- optional `SLURM_ACCOUNT`
-- optional `SLURM_CLUSTER_OPTIONS`
-
-Example:
-
-```bash
-./bin/agar-bactopia submit slurm \
-  --site-config config/sites/slurm.local.env \
-  /path/to/raw_fastqs \
-  /path/to/metadata \
-  /scratch/$USER/bactopia_runs/project_001 \
-  50
-```
-
-The public options are the same as `submit gadi`: `--additional-tools`,
-`--is-agar-project`, `--site-config`, `--mail-user`, and `--mail-options`.
-
-## Quick start on Gadi
-
-1. Copy the site config:
-
-```bash
-cp config/sites/gadi.env.example config/sites/gadi.local.env
-```
-
-2. Edit `config/sites/gadi.local.env` if your shared paths differ.
-
-3. Submit:
-
-```bash
-cd /home/562/ps1744
-/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
-  /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
-  /scratch/rg42/AGAR/metadata/2025/B07 \
-  /scratch/rg42/AGAR/intermediates/2025/B07 \
-  50
-```
-
-## Metadata Sheet Requirements
-
-The submit wrapper expects exactly one metadata sheet matching
-`*_samplesheet.txt` under `METADATA_DIR`, unless you set `AGRF_SHEET_PATH`
-explicitly.
-
-The default batch family prefix is now `batch_bactopia`, so batch outputs are
-written under paths such as `batch_bactopia_001`,
-`batch_bactopia_001_tools`, and `batch_bactopia_consolidated` unless you
-override `BATCH_PREFIX`.
-
-Required metadata columns:
-
-- `Sample name`: sample identifier used to join metadata back onto the
-  consolidated Bactopia outputs
-- `Comments`: free-text phenotype or lab note field used by the MLST review
-  logic
-
-For non-AGAR projects, sample names are not rewritten by the launcher. When
-`IS_AGAR_PROJECT=0` or auto-detection resolves the input as non-AGAR, the
-wrapper skips `normalize_agar_fastq_sample_names.sh` and goes straight to FOFN
-creation or validation.
-
-For AGAR projects, the built-in FOFN creator keeps only sample prefixes that
-match `AGAR_SAMPLE_REGEX`, reports the skipped sample prefixes, and excludes
-those other FASTQs from `samplesheet.fofn`. The default AGAR regex is
-`^[0-9]{2}GNB-[0-9]+R?$`, so mixed folders do not carry non-AGAR sample names
-forward unless you provide a custom `samplesheet.fofn` or override the regex
-explicitly.
-
-At the public wrapper layer you can force the mode with
-`--is-agar-project auto|1|0`, for example `--is-agar-project 0` for non-AGAR
-or mixed folders that should skip AGAR normalization.
-
-How non-AGAR sample names are managed:
-
-- if the launcher creates `samplesheet.fofn`, the sample name is taken as-is
-  from each FASTQ basename before the first underscore in `*_R1.fastq.gz`
-- if you provide an existing `samplesheet.fofn`, its `sample` values are used
-  as provided
-- in both cases, the metadata `Sample name` column must match the final sample
-  names in the FOFN because no AGAR-specific renaming is applied
-
-All other metadata columns are ignored by the metadata-mapping step. They may
-still be kept in your source sheet for lab bookkeeping, but they are not
-required for downstream processing by this pipeline.
 
 ## MLST Review And Discrepancy Resolution
 
@@ -608,7 +500,7 @@ For retry work on a specific batch or subset, the batch submitter accepts:
 - `BATCH_IDS` for an exact comma-separated subset such as `001` or
   `batch_bactopia_001,batch_bactopia_004`
 
-## Mapped Result Columns
+## Mapped Results Output
 
 The metadata-mapped results table is derived from the sample names present in
 the consolidated outputs. Your `*_samplesheet.txt` is then used to attach the
@@ -659,6 +551,124 @@ Review columns:
 
 If a reviewed table is available, the standalone MLST values are written back
 into `mlst_scheme`, `mlst_st`, and `mlst_profile` in the reviewed TSV.
+
+## For Non-Gadi And Non-`rg42` Users
+
+If you are not using the shared `rg42` Gadi install, the clone alone is not
+enough to provide every external helper. The repo does not auto-install these
+tools on clone; install them only if they are not already available at your
+site.
+
+Standalone MLST review helper:
+
+- `run_review_mlst_from_tsv.sh` expects a Miniforge/Conda activation root via
+  `MINIFORGE_ROOT`
+- the activated environment at `MLST_ENV` must provide both `mlst` and `seqkit`
+- on `rg42` Gadi these usually point at the shared
+  `/g/data/<PROJECT>/bactopia_datasets/miniforge3` and
+  `/g/data/<PROJECT>/bactopia_datasets/envs/mlst_env`
+
+Example Miniforge + MLST environment setup on a generic Linux host:
+
+```bash
+MINIFORGE_ROOT=$PWD/miniforge3
+MLST_ENV=$PWD/mlst_env
+
+mkdir -p "$MINIFORGE_ROOT"
+curl -L -o /tmp/Miniforge3.sh \
+  https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh
+bash /tmp/Miniforge3.sh -b -p "$MINIFORGE_ROOT"
+
+source "$MINIFORGE_ROOT/etc/profile.d/conda.sh"
+conda create -y -p "$MLST_ENV" -c conda-forge -c bioconda mlst seqkit
+conda activate "$MLST_ENV"
+
+mlst --version
+seqkit version
+```
+
+If you want the repo to manage local copies for you, use:
+
+```bash
+./scripts/install_optional_local_tools.sh
+```
+
+That helper installs Miniforge under `<repo_root>/.local`, creates a local
+`mlst` + `seqkit` Conda environment, clones
+`https://github.com/JohnsonSingerLab/ST131Typer.git`, and links
+`<repo_root>/ST131Typer.sh` to the cloned script so the existing wrapper
+defaults keep working.
+
+ST131Typer helper:
+
+- the ST131Typer steps do not bundle `ST131Typer.sh`
+- by default the launchers expect it at `<repo_root>/ST131Typer.sh`
+- if you keep it elsewhere, set `ST131_TYPER_SCRIPT=/absolute/path/to/ST131Typer.sh`
+- if the ST131Typer script itself depends on `seqkit`, make sure the same shell
+  or Conda environment used to run ST131Typer has `seqkit` on `PATH`
+
+Minimal verification for non-`rg42` installs:
+
+```bash
+test -f /absolute/path/to/ST131Typer.sh
+source "$MINIFORGE_ROOT/etc/profile.d/conda.sh"
+conda activate "$MLST_ENV"
+command -v mlst
+command -v seqkit
+```
+
+## Submit On Slurm
+
+Public entrypoint:
+
+```bash
+./bin/agar-bactopia submit slurm [OPTIONS] RAW_FASTQ_DIR METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
+```
+
+First-time setup:
+
+```bash
+cp config/sites/slurm.env.example config/sites/slurm.local.env
+```
+
+Edit `config/sites/slurm.local.env` for your site paths, especially:
+
+- `BACTOPIA_PIPELINE`
+- `DATASETS_CACHE`
+- `KRAKEN2_DB`
+- `NEXTFLOW_CONFIG`
+- `FIMTYPER_PIPELINE`
+- `FIMTYPER_CONFIG`
+- `MINIFORGE_ROOT`
+- `MLST_ENV`
+- `SING_CACHE`
+- optional `SLURM_PARTITION`
+- optional `SLURM_ACCOUNT`
+- optional `SLURM_CLUSTER_OPTIONS`
+
+Example:
+
+```bash
+./bin/agar-bactopia submit slurm \
+  --site-config config/sites/slurm.local.env \
+  /path/to/raw_fastqs \
+  /path/to/metadata \
+  /scratch/$USER/bactopia_runs/project_001 \
+  50
+```
+
+The public options are the same as `submit gadi`: `--additional-tools`,
+`--is-agar-project`, `--site-config`, `--mail-user`, and `--mail-options`.
+
+### Packaged Backends
+
+- `gadi`: PBS Pro wrapper and Gadi-oriented shared-path defaults
+- `slurm`: generic Slurm wrapper and Linux-oriented site template
+
+Both backends still assume a Linux execution site with Nextflow plus
+Singularity or Apptainer available. Cloning the repo on macOS is fine for code
+inspection and editing, but the packaged pipeline runners are not a native
+macOS execution target.
 
 ## Layout
 

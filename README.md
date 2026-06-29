@@ -359,6 +359,44 @@ Override PBS mail settings for one submission:
   50
 ```
 
+## Optional ST131Typer Run
+
+ST131Typer does not run by default. If you want the pipeline to submit
+`run_st131typer_from_assemblies.pbs`, you must explicitly set
+`RUN_ST131_TYPER=1` on the submission command.
+
+Example:
+
+```bash
+RUN_ST131_TYPER=1 \
+/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
+  /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
+  /scratch/rg42/AGAR/metadata/2025/B07 \
+  /scratch/rg42/AGAR/intermediates/2025/B07 \
+  50
+```
+
+Important requirements:
+
+- `RUN_ST131_TYPER=1` is required. If you do not set it, no ST131Typer job is
+  submitted.
+- `RUN_COLLECT_ASSEMBLIES=1` must remain enabled because ST131Typer runs after
+  the assemblies folder is created.
+- `ST131Typer.sh` must be available, by default at `<repo_root>/ST131Typer.sh`,
+  or you must set
+  `ST131_TYPER_SCRIPT=/absolute/path/to/ST131Typer.sh`.
+- for non-`rg42` or non-Gadi installs, see `For Non-Gadi And Non-rg42 Users`
+  below for local installation guidance
+
+If you only want to run ST131Typer later against an existing assemblies folder
+and append its summary into the final workbook, use:
+
+```bash
+./scripts/submit_st131typer_append.sh \
+  /scratch/rg42/AGAR/intermediates/2025/B07/batch_bactopia_001_assemblies \
+  /scratch/rg42/AGAR/intermediates/2025/B07/batch_bactopia_results.xlsx
+```
+
 ## MLST Review And Discrepancy Resolution
 
 The pipeline includes a review-driven standalone MLST follow-up for flagged

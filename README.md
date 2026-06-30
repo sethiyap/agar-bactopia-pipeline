@@ -270,95 +270,6 @@ Positional arguments:
   small enough to manage on Gadi and makes partial reruns simpler if one batch
   fails. It is an operational default, not a biological threshold.
 
-Examples:
-
-Default submission:
-
-```bash
-/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
-  /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
-  /scratch/rg42/AGAR/metadata/2025/B07 \
-  /scratch/rg42/AGAR/intermediates/2025/B07 \
-  50
-```
-
-Enable the additional tools bundle:
-
-```bash
-/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
-  --additional-tools yes \
-  /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
-  /scratch/rg42/AGAR/metadata/2025/B07 \
-  /scratch/rg42/AGAR/intermediates/2025/B07 \
-  50
-```
-
-The public submission command does not change. To control how the non-Kleborate
-tool bundle is submitted, set `RUN_TOOLS_PARALLEL` before the same command:
-
-```bash
-# Faster completion: submit one non-Kleborate tool job per tool in parallel
-RUN_TOOLS_PARALLEL=1 \
-/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
-  /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
-  /scratch/rg42/AGAR/metadata/2025/B07 \
-  /scratch/rg42/AGAR/intermediates/2025/B07 \
-  50
-
-# Lower scheduler load: keep the existing sequential bundled-tools behavior
-RUN_TOOLS_PARALLEL=0 \
-/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
-  /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
-  /scratch/rg42/AGAR/metadata/2025/B07 \
-  /scratch/rg42/AGAR/intermediates/2025/B07 \
-  50
-```
-
-Behavior:
-
-- `RUN_TOOLS_PARALLEL=1`
-  For faster completion, each non-Kleborate tool is submitted as its own job
-  after assembly. The final output layout stays the same, with per-tool logs
-  under `<run_label>_tools/logs/<tool>/`.
-- `RUN_TOOLS_PARALLEL=0`
-  The existing behavior. One tools job runs the whole non-Kleborate tool bundle
-  sequentially.
-- If `RUN_TOOLS_PARALLEL` is unset, the default is `0`.
-
-Force non-AGAR mode for mixed or non-AGAR folders:
-
-```bash
-/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
-  --is-agar-project 0 \
-  /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
-  /scratch/rg42/AGAR/metadata/2025/B07 \
-  /scratch/rg42/AGAR/intermediates/2025/B07 \
-  50
-```
-
-Use a different site config:
-
-```bash
-/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
-  --site-config /g/data/rg42/agar-bactopia-pipeline/config/sites/gadi.local.env \
-  /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
-  /scratch/rg42/AGAR/metadata/2025/B07 \
-  /scratch/rg42/AGAR/intermediates/2025/B07 \
-  50
-```
-
-Override PBS mail settings for one submission:
-
-```bash
-/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
-  --mail-user your.name@example.org \
-  --mail-options ae \
-  /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
-  /scratch/rg42/AGAR/metadata/2025/B07 \
-  /scratch/rg42/AGAR/intermediates/2025/B07 \
-  50
-```
-
 ## Optional ST131Typer Run
 
 ST131Typer does not run by default. If you want the pipeline to submit
@@ -396,6 +307,172 @@ Important requirements:
 
 If you only want to run ST131Typer later against an existing assemblies folder
 and append its summary into the final workbook, use:
+
+```bash
+ST131_TYPER_DIR=/g/data/rg42/ST131Typer \
+./scripts/submit_st131typer_append.sh \
+  /scratch/rg42/AGAR/intermediates/2025/B07/batch_bactopia_001_assemblies \
+  /scratch/rg42/AGAR/intermediates/2025/B07/batch_bactopia_results.xlsx
+```
+
+## Common Examples
+
+### Default Submission
+
+Submit a standard Gadi run with the default pipeline behavior.
+
+```bash
+/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
+  /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
+  /scratch/rg42/AGAR/metadata/2025/B07 \
+  /scratch/rg42/AGAR/intermediates/2025/B07 \
+  50
+```
+
+### Enable The Additional Tools Bundle
+
+Turn on the extra non-core typing and screening tools for the run.
+
+```bash
+/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
+  --additional-tools yes \
+  /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
+  /scratch/rg42/AGAR/metadata/2025/B07 \
+  /scratch/rg42/AGAR/intermediates/2025/B07 \
+  50
+```
+
+### Run Non-Kleborate Tools In Parallel
+
+For faster completion, submit one non-Kleborate tool job per tool after
+assembly.
+
+```bash
+RUN_TOOLS_PARALLEL=1 \
+/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
+  /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
+  /scratch/rg42/AGAR/metadata/2025/B07 \
+  /scratch/rg42/AGAR/intermediates/2025/B07 \
+  50
+```
+
+### Run Non-Kleborate Tools Sequentially
+
+Keep the existing single bundled tools job instead of parallel per-tool jobs.
+
+```bash
+RUN_TOOLS_PARALLEL=0 \
+/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
+  /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
+  /scratch/rg42/AGAR/metadata/2025/B07 \
+  /scratch/rg42/AGAR/intermediates/2025/B07 \
+  50
+```
+
+If `RUN_TOOLS_PARALLEL` is unset, the default is `0`.
+
+### Force Non-AGAR Mode
+
+Skip AGAR-specific normalization and filtering for mixed or non-AGAR inputs.
+
+```bash
+/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
+  --is-agar-project 0 \
+  /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
+  /scratch/rg42/AGAR/metadata/2025/B07 \
+  /scratch/rg42/AGAR/intermediates/2025/B07 \
+  50
+```
+
+### Use A Different Site Config
+
+Point the submitter at a non-default `gadi.local.env` file.
+
+```bash
+/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
+  --site-config /g/data/rg42/agar-bactopia-pipeline/config/sites/gadi.local.env \
+  /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
+  /scratch/rg42/AGAR/metadata/2025/B07 \
+  /scratch/rg42/AGAR/intermediates/2025/B07 \
+  50
+```
+
+### Override PBS Mail Settings
+
+Send scheduler mail for one submission without changing shared defaults.
+
+```bash
+/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
+  --mail-user your.name@example.org \
+  --mail-options ae \
+  /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
+  /scratch/rg42/AGAR/metadata/2025/B07 \
+  /scratch/rg42/AGAR/intermediates/2025/B07 \
+  50
+```
+
+### Test One Batch
+
+Submit only a named batch when you want a small validation run.
+
+```bash
+BATCH_IDS=005 BATCH_LIMIT=1 \
+/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
+  /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
+  /scratch/rg42/AGAR/metadata/2025/B07 \
+  /scratch/rg42/AGAR/intermediates/2025/B07 \
+  50
+```
+
+### Start From Batch 3
+
+Resume or retry from a later batch instead of rerunning from batch 1.
+
+```bash
+BATCH_START=3 BATCH_LIMIT=2 \
+/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
+  /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
+  /scratch/rg42/AGAR/metadata/2025/B07 \
+  /scratch/rg42/AGAR/intermediates/2025/B07 \
+  50
+```
+
+### Run Postprocess Only
+
+Skip batch execution and rerun only consolidation, MLST review, and workbook
+export on an existing `RESULTS_ROOT`.
+
+```bash
+POSTPROCESS_ONLY=1 \
+RUN_CONSOLIDATE=1 \
+RUN_MLST_REVIEW=1 \
+RUN_EXPORT_RESULTS_WORKBOOK=1 \
+/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
+  /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
+  /scratch/rg42/AGAR/metadata/2025/B07 \
+  /scratch/rg42/AGAR/intermediates/2025/B07 \
+  50
+```
+
+### Run ST131Typer During The Main Submission
+
+Submit ST131Typer after the assemblies folder is created as part of the main
+pipeline dependency chain.
+
+```bash
+ST131_TYPER_DIR=/g/data/rg42/ST131Typer \
+RUN_ST131_TYPER=1 \
+/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
+  /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
+  /scratch/rg42/AGAR/metadata/2025/B07 \
+  /scratch/rg42/AGAR/intermediates/2025/B07 \
+  50
+```
+
+### Append ST131Typer Summary To An Existing Workbook
+
+Run ST131Typer separately against an existing assemblies folder and append its
+summary sheet into an existing workbook.
 
 ```bash
 ST131_TYPER_DIR=/g/data/rg42/ST131Typer \
@@ -447,61 +524,6 @@ When `RUN_EXPORT_RESULTS_WORKBOOK=1`, the launcher submits
 review. The exporter prefers
 `AGRF_samplesheet_with_results_mlst_reviewed.tsv` when present and otherwise
 falls back to `AGRF_samplesheet_with_results.tsv`.
-
-Common examples:
-
-```bash
-# test one batch
-BATCH_IDS=005 BATCH_LIMIT=1 \
-/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
-  /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
-  /scratch/rg42/AGAR/metadata/2025/B07 \
-  /scratch/rg42/AGAR/intermediates/2025/B07 \
-  50
-
-# start from batch 3
-BATCH_START=3 BATCH_LIMIT=2 \
-/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
-  /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
-  /scratch/rg42/AGAR/metadata/2025/B07 \
-  /scratch/rg42/AGAR/intermediates/2025/B07 \
-  50
-
-# send PBS email notifications for this run only
-/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
-  --mail-user your.name@example.org \
-  --mail-options ae \
-  /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
-  /scratch/rg42/AGAR/metadata/2025/B07 \
-  /scratch/rg42/AGAR/intermediates/2025/B07 \
-  50
-
-# postprocess only: consolidate + review + workbook export
-POSTPROCESS_ONLY=1 \
-RUN_CONSOLIDATE=1 \
-RUN_MLST_REVIEW=1 \
-RUN_EXPORT_RESULTS_WORKBOOK=1 \
-/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
-  /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
-  /scratch/rg42/AGAR/metadata/2025/B07 \
-  /scratch/rg42/AGAR/intermediates/2025/B07 \
-  50
-
-# include ST131Typer after the assemblies folder is created
-RUN_ST131_TYPER=1 \
-/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
-  /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
-  /scratch/rg42/AGAR/metadata/2025/B07 \
-  /scratch/rg42/AGAR/intermediates/2025/B07 \
-  50
-
-# only run ST131Typer for an existing assemblies folder and append the TSV/CSV
-# summary table into the workbook
-# ST131Typer requires an explicit output directory with `-o`
-./scripts/submit_st131typer_append.sh \
-  /scratch/rg42/AGAR/intermediates/2025/B07/batch_bactopia_001_assemblies \
-  /scratch/rg42/AGAR/intermediates/2025/B07/batch_bactopia_results.xlsx
-```
 
 In `POSTPROCESS_ONLY=1` mode, the trailing `50` does not limit the work to 50
 samples. Consolidation runs across all batch directories already present under

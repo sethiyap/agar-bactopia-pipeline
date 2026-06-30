@@ -276,6 +276,16 @@ ST131Typer does not run by default. If you want the pipeline to submit
 `run_st131typer_from_assemblies.pbs`, you must explicitly set
 `RUN_ST131_TYPER=1` on the submission command.
 
+Brief install note:
+
+- on `rg42` Gadi, point `ST131_TYPER_DIR` at the shared clone, for example
+  `/g/data/rg42/ST131Typer`
+- on other Linux systems, clone
+  `https://github.com/JohnsonSingerLab/ST131Typer.git` and then set
+  `ST131_TYPER_DIR=/absolute/path/to/ST131Typer`
+- if you want the repo to install a local copy for you, run
+  `./scripts/install_optional_local_tools.sh`
+
 Example:
 
 ```bash
@@ -485,6 +495,17 @@ ST131_TYPER_DIR=/g/data/rg42/ST131Typer \
 
 The pipeline includes a review-driven standalone MLST follow-up for flagged
 isolates.
+
+Brief install note:
+
+- the standalone MLST review helper needs `mlst` and `seqkit`
+- on `rg42` Gadi, these usually come from the shared Miniforge install and
+  shared `mlst_env`
+- on other Linux systems, install Miniforge, create a Conda environment with
+  `mlst` and `seqkit`, then point the pipeline at `MINIFORGE_ROOT` and
+  `MLST_ENV`
+- if you want the repo to install local copies for you, run
+  `./scripts/install_optional_local_tools.sh`
 
 Review logic:
 

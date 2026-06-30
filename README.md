@@ -368,6 +368,7 @@ ST131Typer does not run by default. If you want the pipeline to submit
 Example:
 
 ```bash
+ST131_TYPER_DIR=/g/data/rg42/ST131Typer \
 RUN_ST131_TYPER=1 \
 /g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
   /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
@@ -382,9 +383,14 @@ Important requirements:
   submitted.
 - `RUN_COLLECT_ASSEMBLIES=1` must remain enabled because ST131Typer runs after
   the assemblies folder is created.
+- if ST131Typer is installed outside the pipeline repo, define
+  `ST131_TYPER_DIR=/absolute/path/to/ST131Typer`
 - `ST131Typer.sh` must be available, by default at `<repo_root>/ST131Typer.sh`,
   or you must set
   `ST131_TYPER_SCRIPT=/absolute/path/to/ST131Typer.sh`.
+- the standalone append helper also defaults `ST131_TYPER_SCRIPT` to
+  `<repo_root>/ST131Typer.sh`, so you can run it from outside the repo checkout
+  as long as that script exists in the cloned pipeline root
 - for non-`rg42` or non-Gadi installs, see `For Non-Gadi And Non-rg42 Users`
   below for local installation guidance
 
@@ -392,6 +398,7 @@ If you only want to run ST131Typer later against an existing assemblies folder
 and append its summary into the final workbook, use:
 
 ```bash
+ST131_TYPER_DIR=/g/data/rg42/ST131Typer \
 ./scripts/submit_st131typer_append.sh \
   /scratch/rg42/AGAR/intermediates/2025/B07/batch_bactopia_001_assemblies \
   /scratch/rg42/AGAR/intermediates/2025/B07/batch_bactopia_results.xlsx
@@ -640,6 +647,8 @@ defaults keep working.
 ST131Typer helper:
 
 - the ST131Typer steps do not bundle `ST131Typer.sh`
+- if ST131Typer is installed in its own folder, set
+  `ST131_TYPER_DIR=/absolute/path/to/ST131Typer`
 - by default the launchers expect it at `<repo_root>/ST131Typer.sh`
 - if you keep it elsewhere, set `ST131_TYPER_SCRIPT=/absolute/path/to/ST131Typer.sh`
 - if the ST131Typer script itself depends on `seqkit`, make sure the same shell

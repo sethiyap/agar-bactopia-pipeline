@@ -9,7 +9,8 @@ Usage:
 
 Environment variables:
   RESULTS_ROOT                 Default: parent directory of ASSEMBLIES_DIR
-  ST131_TYPER_SCRIPT           Default: <current_workdir>/ST131Typer.sh
+  ST131_TYPER_DIR              Optional directory containing ST131Typer.sh
+  ST131_TYPER_SCRIPT           Default: <repo_root>/ST131Typer.sh
   ST131_TYPER_OUTPUT_DIR       Default: <results_root>/<basename(results_root)>_st131typer
   ST131_TYPER_PBS_SCRIPT       Default: <script_dir>/run_st131typer_from_assemblies.pbs
   EXPORT_RESULTS_WORKBOOK_PBS_SCRIPT Default: <script_dir>/run_export_bactopia_results_workbook.pbs
@@ -27,6 +28,7 @@ EOF
 }
 
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+repo_root=$(cd "$script_dir/.." && pwd)
 
 if [[ $# -lt 1 || $# -gt 2 ]]; then
   usage >&2
@@ -36,7 +38,12 @@ fi
 assemblies_dir=$1
 workbook_output=${2:-${WORKBOOK_OUTPUT:-}}
 results_root=${RESULTS_ROOT:-$(dirname "$assemblies_dir")}
-st131typer_script=${ST131_TYPER_SCRIPT:-$PWD/ST131Typer.sh}
+st131typer_dir=${ST131_TYPER_DIR:-}
+if [[ -n $st131typer_dir ]]; then
+  st131typer_script=${ST131_TYPER_SCRIPT:-$st131typer_dir/ST131Typer.sh}
+else
+  st131typer_script=${ST131_TYPER_SCRIPT:-$repo_root/ST131Typer.sh}
+fi
 st131typer_output_dir=${ST131_TYPER_OUTPUT_DIR:-${results_root}/$(basename "$results_root")_st131typer}
 st131typer_pbs_script=${ST131_TYPER_PBS_SCRIPT:-$script_dir/run_st131typer_from_assemblies.pbs}
 export_results_workbook_pbs_script=${EXPORT_RESULTS_WORKBOOK_PBS_SCRIPT:-$script_dir/run_export_bactopia_results_workbook.pbs}
@@ -57,8 +64,11 @@ fi
 
 if [[ ! -f $st131typer_script ]]; then
   echo "ST131_TYPER_SCRIPT not found: $st131typer_script" >&2
+  echo "Define ST131_TYPER_DIR=/path/to/ST131Typer or ST131_TYPER_SCRIPT=/path/to/ST131Typer.sh" >&2
   exit 1
 fi
+
+echo "Found ST131Typer.sh at: $st131typer_script"
 
 if [[ ! -f $st131typer_pbs_script ]]; then
   echo "ST131_TYPER_PBS_SCRIPT not found: $st131typer_pbs_script" >&2

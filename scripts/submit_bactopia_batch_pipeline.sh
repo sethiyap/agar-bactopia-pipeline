@@ -46,6 +46,7 @@ Environment variables:
   ASSEMBLIES_OUTDIR       Default: <results_root>/<basename(results_root)>_assemblies
   RUN_ST131_TYPER         Default: 0
   ST131_TYPER_PBS_SCRIPT   Default: <script_dir>/run_st131typer_from_assemblies.pbs
+  ST131_TYPER_DIR         Optional directory containing ST131Typer.sh
   ST131_TYPER_SCRIPT      Default: <repo_root>/ST131Typer.sh
   ST131_TYPER_INPUT_DIR    Default: <ASSEMBLIES_OUTDIR>
   ST131_TYPER_OUTPUT_DIR   Default: <results_root>/<basename(results_root)>_st131typer
@@ -130,7 +131,12 @@ RESULTS_ROOT=${RESULTS_ROOT:-/scratch/${PROJECT:-rg42}/${run_user}/bactopia_resu
 results_root_base=$(basename "$RESULTS_ROOT")
 ASSEMBLIES_OUTDIR=${ASSEMBLIES_OUTDIR:-${RESULTS_ROOT}/${results_root_base}_assemblies}
 ST131_TYPER_PBS_SCRIPT=${ST131_TYPER_PBS_SCRIPT:-$script_dir/run_st131typer_from_assemblies.pbs}
-ST131_TYPER_SCRIPT=${ST131_TYPER_SCRIPT:-$BASE_DIR/ST131Typer.sh}
+ST131_TYPER_DIR=${ST131_TYPER_DIR:-}
+if [[ -n $ST131_TYPER_DIR ]]; then
+  ST131_TYPER_SCRIPT=${ST131_TYPER_SCRIPT:-$ST131_TYPER_DIR/ST131Typer.sh}
+else
+  ST131_TYPER_SCRIPT=${ST131_TYPER_SCRIPT:-$BASE_DIR/ST131Typer.sh}
+fi
 ST131_TYPER_INPUT_DIR=${ST131_TYPER_INPUT_DIR:-$ASSEMBLIES_OUTDIR}
 ST131_TYPER_OUTPUT_DIR=${ST131_TYPER_OUTPUT_DIR:-${RESULTS_ROOT}/${results_root_base}_st131typer}
 CONSOLIDATED_OUTDIR=${CONSOLIDATED_OUTDIR:-${RESULTS_ROOT}/${BATCH_PREFIX}_consolidated}
@@ -460,6 +466,12 @@ if [[ $RUN_ST131_TYPER != 0 ]]; then
     echo "RUN_ST131_TYPER=1 requires RUN_COLLECT_ASSEMBLIES=1 so the assemblies folder can be created first." >&2
     exit 1
   fi
+  if [[ ! -f $ST131_TYPER_SCRIPT ]]; then
+    echo "ST131_TYPER_SCRIPT not found: $ST131_TYPER_SCRIPT" >&2
+    echo "Define ST131_TYPER_DIR=/path/to/ST131Typer or ST131_TYPER_SCRIPT=/path/to/ST131Typer.sh" >&2
+    exit 1
+  fi
+  echo "Found ST131Typer.sh at: $ST131_TYPER_SCRIPT"
   st131typer_job=$(scheduler_submit \
     "" \
     "$assemblies_job" \

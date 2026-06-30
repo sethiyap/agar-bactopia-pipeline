@@ -56,7 +56,8 @@ These are not bundled in the repo and must exist on the execution site.
 For non-Gadi or non-`rg42` installs, these helpers are not installed by cloning
 this repo. Install them only if they are not already available on the target
 site, then point the wrappers at the correct paths via environment variables
-such as `MINIFORGE_ROOT`, `MLST_ENV`, and `ST131_TYPER_SCRIPT`.
+such as `MINIFORGE_ROOT`, `MLST_ENV`, `ST131_TYPER_DIR`, and
+`ST131_TYPER_SCRIPT`.
 
 ## MLST Review Workflow
 

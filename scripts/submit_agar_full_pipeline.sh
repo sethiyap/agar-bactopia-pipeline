@@ -66,6 +66,7 @@ Environment variables:
   MAP_OUTPUT             Default: <RESULTS_ROOT>/AGRF_samplesheet_with_results.tsv
   REVIEW_OUTPUT_DIR      Default: <RESULTS_ROOT>/mlst_review_standalone
   POST_REVIEW_MAP_OUTPUT Default: <RESULTS_ROOT>/AGRF_samplesheet_with_results_post_review.tsv
+  ST131_TYPER_DIR        Optional directory containing ST131Typer.sh
   ST131_TYPER_OUTPUT_DIR Default: <RESULTS_ROOT>/<basename(RESULTS_ROOT)>_st131typer
   RESULTS_WORKBOOK_OUTPUT Default: <RESULTS_ROOT>/<basename(RESULTS_ROOT)>_results.xlsx
   LOG_DIR                Default: dirname(LOG_FILE) or <RESULTS_ROOT>
@@ -178,7 +179,12 @@ map_pbs_script=${MAP_PBS_SCRIPT:-$script_dir/run_map_agrf_samplesheet_results.pb
 map_r_script=${MAP_R_SCRIPT:-$script_dir/map_agrf_samplesheet_results.R}
 review_mlst_pbs_script=${REVIEW_MLST_PBS_SCRIPT:-$script_dir/run_review_mlst_from_tsv.pbs}
 st131typer_pbs_script=${ST131_TYPER_PBS_SCRIPT:-$script_dir/run_st131typer_from_assemblies.pbs}
-st131typer_script=${ST131_TYPER_SCRIPT:-$run_agar_dir/ST131Typer.sh}
+st131typer_dir=${ST131_TYPER_DIR:-}
+if [[ -n $st131typer_dir ]]; then
+  st131typer_script=${ST131_TYPER_SCRIPT:-$st131typer_dir/ST131Typer.sh}
+else
+  st131typer_script=${ST131_TYPER_SCRIPT:-$run_agar_dir/ST131Typer.sh}
+fi
 st131typer_input_dir=${ST131_TYPER_INPUT_DIR:-}
 st131typer_output_dir=${ST131_TYPER_OUTPUT_DIR:-$results_root_arg/$(basename "$results_root_arg")_st131typer}
 export_results_workbook_pbs_script=${EXPORT_RESULTS_WORKBOOK_PBS_SCRIPT:-$script_dir/run_export_bactopia_results_workbook.pbs}
@@ -533,9 +539,10 @@ fi
 if [[ $run_st131typer == 1 ]]; then
   for path in "$st131typer_pbs_script" "$st131typer_script"; do
     if [[ ! -f $path ]]; then
-      fail "Required ST131Typer script not found: $path"
+      fail "Required ST131Typer script not found: $path. Define ST131_TYPER_DIR=/path/to/ST131Typer or ST131_TYPER_SCRIPT=/path/to/ST131Typer.sh"
     fi
   done
+  log "Found ST131Typer.sh at: $st131typer_script"
 fi
 
 if [[ $postprocess_only != 1 ]]; then
@@ -625,6 +632,7 @@ export PBS_MAIL_USER=${PBS_MAIL_USER:-}
 export RUN_ST131_TYPER=$run_st131typer
 export ST131_TYPER_PBS_SCRIPT="$st131typer_pbs_script"
 export ST131_TYPER_SCRIPT="$st131typer_script"
+export ST131_TYPER_DIR=${st131typer_dir:-}
 export ST131_TYPER_OUTPUT_DIR="$st131typer_output_dir"
 if [[ -n $st131typer_input_dir ]]; then
   export ST131_TYPER_INPUT_DIR="$st131typer_input_dir"

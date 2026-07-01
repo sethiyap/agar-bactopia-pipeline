@@ -566,7 +566,7 @@ if [[ $run_st131typer == 1 ]]; then
       fail "Required ST131Typer script not found: $path. Define ST131_TYPER_DIR=/path/to/ST131Typer or ST131_TYPER_SCRIPT=/path/to/ST131Typer.sh"
     fi
   done
-  log "Found ST131Typer.sh at: $st131typer_script"
+  log "INFO" "Found ST131Typer.sh at: $st131typer_script"
 fi
 
 if [[ $postprocess_only != 1 ]]; then

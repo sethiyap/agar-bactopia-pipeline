@@ -32,17 +32,20 @@ distribution of Bactopia rather than a completely separate biological pipeline.
 
 ### Connecting To Gadi
 
-Log in to Gadi with your NCI account, then move into the shared pipeline
-install and AGAR working areas:
+Log in to Gadi with your NCI account, stay in your home directory for normal
+command launches, and access the shared pipeline plus AGAR working areas by
+path:
 
 ```bash
 ssh <nci_username>@gadi.nci.org.au
 
-cd /g/data/rg42/agar-bactopia-pipeline
+cd /home/562/<nci_username>
 
-# AGAR raw data, metadata, and intermediate processing roots
-cd /scratch/rg42/AGAR
-ls
+# inspect the shared pipeline install by path
+ls /g/data/rg42/agar-bactopia-pipeline
+
+# inspect AGAR raw data, metadata, and intermediate processing roots
+ls /scratch/rg42/AGAR
 ```
 
 Key Gadi paths used by this pipeline:
@@ -51,11 +54,13 @@ Key Gadi paths used by this pipeline:
 - AGAR raw data root: `/scratch/rg42/AGAR/raw_data`
 - AGAR metadata root: `/scratch/rg42/AGAR/metadata`
 - AGAR intermediate processing root: `/scratch/rg42/AGAR/intermediates`
+- preferred launch directory for jobs: `/home/562/<nci_username>`
 
 Typical Gadi workflow:
 
 - log in to Gadi
-- inspect or update the shared pipeline under `/g/data/rg42/agar-bactopia-pipeline`
+- launch packaged commands from `/home/562/<nci_username>` and call scripts by
+  their absolute `/g/data/rg42/agar-bactopia-pipeline/...` paths
 - optionally download a new AGRF delivery into `/scratch/rg42/AGAR/raw_data/...`
 - read batch inputs from `/scratch/rg42/AGAR/raw_data/...`
 - read metadata from `/scratch/rg42/AGAR/metadata/...`
@@ -69,9 +74,9 @@ The AGRF download helper defaults to `/scratch/rg42/AGAR/raw_data`, but that
 raw-data destination root is configurable with `DEST_ROOT`.
 
 ```bash
-cd /g/data/rg42/agar-bactopia-pipeline
+cd /home/562/<nci_username>
 
-./scripts/download_agrf_to_gadi.sh \
+/g/data/rg42/agar-bactopia-pipeline/scripts/download_agrf_to_gadi.sh \
   user@source.example.org:/path/to/AGRF_CAGRF26050180_AAHJ2FTM5 \
   2025 \
   B07
@@ -112,10 +117,10 @@ This helper always submits a PBS job on Gadi. It does not run the transfer
 interactively in the login shell.
 
 ```bash
-cd /g/data/rg42/agar-bactopia-pipeline
+cd /home/562/<nci_username>
 
 RDS_SFTP_USER=<your_rds_username> \
-./scripts/copy_RDS_to_GADI.sh \
+/g/data/rg42/agar-bactopia-pipeline/scripts/copy_RDS_to_GADI.sh \
   /rds/PRJ-AGAR/PRJ-AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
   /scratch/rg42/AGAR/raw_data/2025/B07
 ```
@@ -130,8 +135,12 @@ Notes:
 
 - `RDS_SRC` can point to either a file or a directory on RDS
 - `GADI_DEST` is the destination parent directory on Gadi
-- when you run `./scripts/copy_RDS_to_GADI.sh ...`, the script submits a
-  PBS job and prints the submitted job id
+- run this command from your home directory, for example
+  `/home/562/<nci_username>`, and call the script by its absolute
+  `/g/data/rg42/agar-bactopia-pipeline/...` path if you want the default PBS
+  `.o` and `.e` files to land under home instead of the shared pipeline checkout
+- when you run `/g/data/rg42/agar-bactopia-pipeline/scripts/copy_RDS_to_GADI.sh ...`,
+  the script submits a PBS job and prints the submitted job id
 - if you want to rename the restored folder or file on Gadi, set
   `GADI_LOCAL_NAME`
 - if you want to resume a partially completed download, keep
@@ -201,13 +210,14 @@ Example shared install on Gadi:
 ```bash
 cd /g/data/rg42
 git clone https://github.com/sethiyap/agar-bactopia-pipeline.git agar-bactopia-pipeline
-cd /g/data/rg42/agar-bactopia-pipeline
+cd /home/562/<nci_username>
 ```
 
 Create the shared Gadi site config:
 
 ```bash
-cp config/sites/gadi.env.example config/sites/gadi.local.env
+cp /g/data/rg42/agar-bactopia-pipeline/config/sites/gadi.env.example \
+  /g/data/rg42/agar-bactopia-pipeline/config/sites/gadi.local.env
 ```
 
 Review and edit `config/sites/gadi.local.env` so the server-specific paths are
@@ -602,14 +612,19 @@ files.
 The launcher now runs an inode preflight against `RESULTS_ROOT` before
 submission. On Gadi scratch it checks filesystem inode headroom and also looks
 for project scratch quota issues via `lquota` or `nci_account`. Set
-`CHECK_INODE_QUOTA=0` to skip it, or tune `INODE_FS_MIN_FREE_COUNT`,
-`INODE_FS_MIN_FREE_PCT`, and `PROJECT_INODE_MAX_USE_PCT`.
+`CHECK_INODE_QUOTA=0` to skip it, or tune `INODE_FS_WARN_FREE_PCT`,
+`INODE_FS_MIN_FREE_COUNT`, `INODE_FS_MIN_FREE_PCT`,
+`PROJECT_INODE_WARN_USE_PCT`, and `PROJECT_INODE_MAX_USE_PCT`.
 An inode limit is a file-count limit, not a size limit, so you can hit it even
 when there is still disk space left. If this check fails on Gadi, clean up old
 batch result folders, `work/` directories, and other no-longer-needed files
 under your project scratch area such as `/scratch/rg42/...`.
 
-How to get rid of an inode overload error on Gadi:
+If free inode headroom drops below 15%, the launcher now prints a warning
+before submission so you can decide whether to stop, clean scratch, and rerun.
+The pipeline only hard-fails when the stricter stop thresholds are crossed.
+
+**How to get rid of an inode overload error on Gadi:**
 
 - check whether the problem is filesystem inode headroom or project quota:
   `df -Pi /scratch/rg42/...`, `lquota`, and `nci_account -P rg42`

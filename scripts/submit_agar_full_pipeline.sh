@@ -59,8 +59,11 @@ Environment variables:
   RUN_ST131_TYPER        Default: 0. Set to 1 to run ST131Typer after assemblies
   RUN_EXPORT_RESULTS_WORKBOOK Default: 1. Set to 0 to skip final Excel workbook export
   CHECK_INODE_QUOTA      Default: 1. Set to 0 to skip the inode preflight check
+  INODE_FS_WARN_FREE_PCT Default: 15. Warn if df reports less free inode percent
   INODE_FS_MIN_FREE_COUNT Default: 50000. Fail early if df reports fewer free inodes
   INODE_FS_MIN_FREE_PCT  Default: 5. Fail early if df reports less free inode percent
+  PROJECT_INODE_WARN_USE_PCT Default: 85. Warn if lquota/nci_account reports
+                         scratch inode usage at or above this percent
   PROJECT_INODE_MAX_USE_PCT Default: 95. Fail early if lquota/nci_account reports
                          scratch inode usage at or above this percent
   MAP_OUTPUT             Default: <RESULTS_ROOT>/AGRF_samplesheet_with_results.tsv
@@ -194,8 +197,10 @@ is_agar_project=${IS_AGAR_PROJECT:-auto}
 default_agar_sample_regex='^[0-9]{2}GNB-[0-9]+R?$'
 agar_sample_regex=${AGAR_SAMPLE_REGEX:-$default_agar_sample_regex}
 check_inode_quota=${CHECK_INODE_QUOTA:-1}
+inode_fs_warn_free_pct=${INODE_FS_WARN_FREE_PCT:-15}
 inode_fs_min_free_count=${INODE_FS_MIN_FREE_COUNT:-50000}
 inode_fs_min_free_pct=${INODE_FS_MIN_FREE_PCT:-5}
+project_inode_warn_use_pct=${PROJECT_INODE_WARN_USE_PCT:-85}
 project_inode_max_use_pct=${PROJECT_INODE_MAX_USE_PCT:-95}
 current_step="initialization"
 
@@ -323,6 +328,10 @@ check_filesystem_inode_headroom() {
   free_pct=$((100 - df_use_pct))
   log "INFO" "Filesystem inode preflight for $existing_path: ${df_ifree} free inodes (${free_pct}% free)"
 
+  if (( free_pct < inode_fs_warn_free_pct )); then
+    log "WARN" "Low filesystem inode headroom under $existing_path: ${df_ifree} free inodes (${free_pct}% free). Consider freeing scratch space before continuing."
+  fi
+
   if (( df_ifree < inode_fs_min_free_count || free_pct < inode_fs_min_free_pct )); then
     fail "Not enough filesystem inode headroom under $existing_path: ${df_ifree} free inodes (${free_pct}% free). Adjust RESULTS_ROOT, clean scratch, or override INODE_FS_MIN_FREE_COUNT / INODE_FS_MIN_FREE_PCT."
   fi
@@ -371,6 +380,9 @@ check_quota_text_report() {
     if [[ $iusage =~ ^[0-9]+$ && $iquota =~ ^[0-9]+$ && $iquota -gt 0 ]]; then
       iuse_pct=$(( (iusage * 100) / iquota ))
       log "INFO" "${source} inode preflight for project ${project}: scratch inode usage ${iusage}/${iquota} (${iuse_pct}%)"
+      if (( iuse_pct >= project_inode_warn_use_pct )); then
+        log "WARN" "Scratch inode usage for project ${project} is ${iuse_pct}% according to ${source} (${iusage}/${iquota}). Consider cleaning scratch before continuing."
+      fi
       if (( iuse_pct >= project_inode_max_use_pct )); then
         fail "Scratch inode usage for project ${project} is ${iuse_pct}% according to ${source} (${iusage}/${iquota}). Clean scratch or raise PROJECT_INODE_MAX_USE_PCT if this threshold is intentionally higher."
       fi
@@ -391,6 +403,9 @@ check_quota_text_report() {
       if [[ $iusage =~ ^[0-9]+$ && $iquota =~ ^[0-9]+$ && $iquota -gt 0 ]]; then
         iuse_pct=$(( (iusage * 100) / iquota ))
         log "INFO" "${source} inode preflight for project ${project}: scratch inode usage ${iusage}/${iquota} (${iuse_pct}%)"
+        if (( iuse_pct >= project_inode_warn_use_pct )); then
+          log "WARN" "Scratch inode usage for project ${project} is ${iuse_pct}% according to ${source} (${iusage}/${iquota}). Consider cleaning scratch before continuing."
+        fi
         if (( iuse_pct >= project_inode_max_use_pct )); then
           fail "Scratch inode usage for project ${project} is ${iuse_pct}% according to ${source} (${iusage}/${iquota}). Clean scratch or raise PROJECT_INODE_MAX_USE_PCT if this threshold is intentionally higher."
         fi
@@ -413,6 +428,9 @@ check_quota_text_report() {
 
   if [[ -n $max_pct ]]; then
     log "INFO" "${source} inode preflight for project ${project}: parsed scratch inode usage up to ${max_pct}%"
+    if (( max_pct >= project_inode_warn_use_pct )); then
+      log "WARN" "Scratch inode usage for project ${project} is ${max_pct}% according to ${source}. Consider cleaning scratch before continuing."
+    fi
     if (( max_pct >= project_inode_max_use_pct )); then
       fail "Scratch inode usage for project ${project} is ${max_pct}% according to ${source}. Clean scratch or raise PROJECT_INODE_MAX_USE_PCT if this threshold is intentionally higher."
     fi
@@ -484,8 +502,14 @@ run_inode_preflight() {
   if ! [[ $inode_fs_min_free_count =~ ^[0-9]+$ ]]; then
     fail "INODE_FS_MIN_FREE_COUNT must be a non-negative integer: $inode_fs_min_free_count"
   fi
+  if ! [[ $inode_fs_warn_free_pct =~ ^[0-9]+$ ]] || (( inode_fs_warn_free_pct > 100 )); then
+    fail "INODE_FS_WARN_FREE_PCT must be an integer between 0 and 100: $inode_fs_warn_free_pct"
+  fi
   if ! [[ $inode_fs_min_free_pct =~ ^[0-9]+$ ]] || (( inode_fs_min_free_pct > 100 )); then
     fail "INODE_FS_MIN_FREE_PCT must be an integer between 0 and 100: $inode_fs_min_free_pct"
+  fi
+  if ! [[ $project_inode_warn_use_pct =~ ^[0-9]+$ ]] || (( project_inode_warn_use_pct < 0 || project_inode_warn_use_pct > 100 )); then
+    fail "PROJECT_INODE_WARN_USE_PCT must be an integer between 0 and 100: $project_inode_warn_use_pct"
   fi
   if ! [[ $project_inode_max_use_pct =~ ^[0-9]+$ ]] || (( project_inode_max_use_pct < 1 || project_inode_max_use_pct > 100 )); then
     fail "PROJECT_INODE_MAX_USE_PCT must be an integer between 1 and 100: $project_inode_max_use_pct"

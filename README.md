@@ -100,8 +100,52 @@ Notes:
   `*_samplesheet.txt`
 - that metadata sheet must contain the columns `Sample name` and `Comments`
 - `Sample name` must match the final sample ids used in the FOFN
-- `Comments` should include the species name or other phenotype text used by
-  the downstream review and mapping steps
+- `Comments` should include the free-text phenotype or organism name used by
+  the downstream MLST review and mapping steps
+
+### Downloading Data From RDS
+
+If the data already exists on the University of Sydney Research Data Store
+(RDS), download it onto Gadi with the packaged restore helper.
+
+This helper always submits a PBS job on Gadi. It does not run the transfer
+interactively in the login shell.
+
+```bash
+cd /g/data/rg42/agar-bactopia-pipeline
+
+RDS_SFTP_USER=<your_rds_username> \
+./scripts/copy_RDS_to_GADI.sh \
+  /rds/PRJ-AGAR/PRJ-AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
+  /scratch/rg42/AGAR/raw_data/2025/B07
+```
+
+That command creates:
+
+```bash
+/scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5
+```
+
+Notes:
+
+- `RDS_SRC` can point to either a file or a directory on RDS
+- `GADI_DEST` is the destination parent directory on Gadi
+- when you run `./scripts/copy_RDS_to_GADI.sh ...`, the script submits a
+  PBS job and prints the submitted job id
+- if you want to rename the restored folder or file on Gadi, set
+  `GADI_LOCAL_NAME`
+- if you want to resume a partially completed download, keep
+  `RDS_RESUME_DOWNLOAD=1`
+- if you want to skip a restore when the final target already exists, set
+  `RDS_SKIP_IF_DEST_EXISTS=1`
+- if you want the detailed transfer log somewhere explicit, set
+  `DEBUG_LOG_DIR=/scratch/rg42/${USER}/transfer_logs`
+- if you want the PBS `.o` and `.e` files somewhere explicit, set
+  `PBS_LOG_DIR=/scratch/rg42/${USER}/pbs_logs`
+- if you are restoring AGAR raw data, the usual destination is
+  `/scratch/rg42/AGAR/raw_data/<year>/<batch>`
+- if you are restoring previous results or intermediates from RDS, point
+  `GADI_DEST` at the matching location under `/scratch/rg42/AGAR/intermediates/...`
 
 ## Metadata Sheet Requirements
 
@@ -118,7 +162,7 @@ Required metadata columns:
 
 - `Sample name`: sample identifier used to join metadata back onto the
   consolidated Bactopia outputs
-- `Comments`: free-text phenotype or lab note field used by the MLST review
+- `Comments`: free-text phenotype or organism name used by the MLST review
   logic
 
 For non-AGAR projects, sample names are not rewritten by the launcher. When

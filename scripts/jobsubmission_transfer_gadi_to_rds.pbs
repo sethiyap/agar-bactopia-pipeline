@@ -1,0 +1,116 @@
+#!/bin/bash
+#PBS -P rg42
+#PBS -q copyq
+#PBS -l walltime=08:00:00
+#PBS -l mem=4GB
+#PBS -l ncpus=1
+#PBS -l jobfs=1GB
+#PBS -l storage=gdata/rg42+scratch/rg42
+#PBS -l wd
+#PBS -N transfer_gadi_to_rds_job
+
+# Usage on Gadi:
+#   export SRC_PATH=/scratch/rg42/AGAR/intermediates/2025/B07
+#   export RDS_DEST=/rds/PRJ-AGAR/PRJ-AGAR/intermediates/2025/B07
+#   export DEBUG_LOG_DIR=/scratch/rg42/${USER}/transfer_logs
+#   export RDS_UPLOAD_MANIFEST_DIR=/scratch/rg42/${USER}/.rds_transfer_manifests
+#   qsub -V /g/data/rg42/agar-bactopia-pipeline/scripts/jobsubmission_transfer_gadi_to_rds.pbs
+
+set -euo pipefail
+
+script_dir=$(cd "$(dirname "$0")" && pwd)
+project_name=${PBS_PROJECT:-${PROJECT:-rg42}}
+scratch_user_root="/scratch/${project_name}/${USER}"
+
+DEBUG_LOG_DIR=${DEBUG_LOG_DIR:-${scratch_user_root}/transfer_logs}
+mkdir -p "$DEBUG_LOG_DIR"
+debug_stamp=${PBS_JOBID:-manual}.$(date '+%Y%m%d_%H%M%S')
+DEBUG_RUN_LOG=${DEBUG_RUN_LOG:-$DEBUG_LOG_DIR/transfer_gadi_to_rds.${debug_stamp}.run.log}
+RDS_UPLOAD_MANIFEST_DIR=${RDS_UPLOAD_MANIFEST_DIR:-${scratch_user_root}/.rds_transfer_manifests}
+KEEP_DEBUG_LOG=${KEEP_DEBUG_LOG:-0}
+
+SRC_PATH=${SRC_PATH:-}
+RDS_DEST=${RDS_DEST:-}
+RDS_SFTP_OPTS=${RDS_SFTP_OPTS:-}
+RDS_SFTP_CHUNK_SIZE=${RDS_SFTP_CHUNK_SIZE:-2000}
+RDS_IGNORE_MANIFEST=${RDS_IGNORE_MANIFEST:-0}
+RDS_PRIORITIZE_UPLOADS=${RDS_PRIORITIZE_UPLOADS:-1}
+RDS_INCLUDE_DIRS=${RDS_INCLUDE_DIRS:-}
+RDS_EXCLUDE_DIRS=${RDS_EXCLUDE_DIRS:-_work}
+RDS_EXCLUDE_FILES=${RDS_EXCLUDE_FILES:-.nextflow.log,.nextflow.log.*}
+RDS_EXCLUDE_PATHS=${RDS_EXCLUDE_PATHS:-}
+RDS_COPY_SINCE=${RDS_COPY_SINCE:-}
+TRANSFER_SCRIPT=${TRANSFER_SCRIPT:-$script_dir/transfer_gadi_to_rds.sh}
+
+mkdir -p "$RDS_UPLOAD_MANIFEST_DIR"
+
+if [[ -z $SRC_PATH || -z $RDS_DEST ]]; then
+  echo "SRC_PATH and RDS_DEST must be set before submitting this PBS job." >&2
+  echo "Use exported variables followed by qsub -V, for example:" >&2
+  echo "  export SRC_PATH=/scratch/rg42/AGAR/intermediates/2025/B07" >&2
+  echo "  export RDS_DEST=/rds/PRJ-AGAR/PRJ-AGAR/intermediates/2025/B07" >&2
+  echo "  qsub -V $script_dir/jobsubmission_transfer_gadi_to_rds.pbs" >&2
+  exit 1
+fi
+
+if [[ ! -d $SRC_PATH ]]; then
+  echo "Source folder not found: $SRC_PATH" >&2
+  exit 1
+fi
+
+if [[ ! -x $TRANSFER_SCRIPT ]]; then
+  echo "Transfer script not found or not executable: $TRANSFER_SCRIPT" >&2
+  exit 1
+fi
+
+echo "Transfer job settings:"
+echo "  PBS_JOBID=${PBS_JOBID:-<unset>}"
+echo "  PBS_O_WORKDIR=${PBS_O_WORKDIR:-<unset>}"
+echo "  DEBUG_RUN_LOG=$DEBUG_RUN_LOG"
+echo "  DEBUG_LOG_DIR=$DEBUG_LOG_DIR"
+echo "  RDS_UPLOAD_MANIFEST_DIR=$RDS_UPLOAD_MANIFEST_DIR"
+echo "  KEEP_DEBUG_LOG=$KEEP_DEBUG_LOG"
+echo "  SRC_PATH=$SRC_PATH"
+echo "  RDS_DEST=$RDS_DEST"
+echo "  RDS_SFTP_CHUNK_SIZE=$RDS_SFTP_CHUNK_SIZE"
+echo "  RDS_IGNORE_MANIFEST=$RDS_IGNORE_MANIFEST"
+echo "  RDS_PRIORITIZE_UPLOADS=$RDS_PRIORITIZE_UPLOADS"
+echo "  RDS_INCLUDE_DIRS=${RDS_INCLUDE_DIRS:-<none>}"
+echo "  RDS_EXCLUDE_DIRS=${RDS_EXCLUDE_DIRS:-<none>}"
+echo "  RDS_EXCLUDE_FILES=${RDS_EXCLUDE_FILES:-<none>}"
+echo "  RDS_EXCLUDE_PATHS=${RDS_EXCLUDE_PATHS:-<none>}"
+echo "  RDS_COPY_SINCE=${RDS_COPY_SINCE:-<all files>}"
+echo "  TRANSFER_SCRIPT=$TRANSFER_SCRIPT"
+echo "  Wrapper log directory contents:"
+ls -ld "$DEBUG_LOG_DIR"
+echo "  Manifest directory contents:"
+ls -ld "$RDS_UPLOAD_MANIFEST_DIR"
+
+set +e
+RDS_UPLOAD_MANIFEST_DIR="$RDS_UPLOAD_MANIFEST_DIR" \
+RDS_SFTP_OPTS="$RDS_SFTP_OPTS" \
+RDS_SFTP_CHUNK_SIZE="$RDS_SFTP_CHUNK_SIZE" \
+RDS_IGNORE_MANIFEST="$RDS_IGNORE_MANIFEST" \
+RDS_PRIORITIZE_UPLOADS="$RDS_PRIORITIZE_UPLOADS" \
+RDS_INCLUDE_DIRS="$RDS_INCLUDE_DIRS" \
+RDS_EXCLUDE_DIRS="$RDS_EXCLUDE_DIRS" \
+RDS_EXCLUDE_FILES="$RDS_EXCLUDE_FILES" \
+RDS_EXCLUDE_PATHS="$RDS_EXCLUDE_PATHS" \
+RDS_COPY_SINCE="$RDS_COPY_SINCE" \
+  bash -x "$TRANSFER_SCRIPT" "$SRC_PATH" "$RDS_DEST" >"$DEBUG_RUN_LOG" 2>&1
+transfer_exit_code=$?
+set -e
+
+echo "Transfer helper exit code: $transfer_exit_code"
+echo "Transfer helper log: $DEBUG_RUN_LOG"
+if [[ $transfer_exit_code -ne 0 && -f $DEBUG_RUN_LOG ]]; then
+  echo "Last 40 lines of transfer helper log:"
+  tail -n 40 "$DEBUG_RUN_LOG"
+fi
+
+if [[ $transfer_exit_code -eq 0 && $KEEP_DEBUG_LOG != 1 && -f $DEBUG_RUN_LOG ]]; then
+  rm -f "$DEBUG_RUN_LOG"
+  echo "Removed successful transfer helper log: $DEBUG_RUN_LOG"
+fi
+
+exit "$transfer_exit_code"

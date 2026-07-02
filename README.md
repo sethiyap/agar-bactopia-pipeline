@@ -161,6 +161,81 @@ Notes:
 - if you are restoring previous results or intermediates from RDS, point
   `GADI_DEST` at the matching location under `/scratch/rg42/AGAR/intermediates/...`
 
+## Copy Finished Results Back To RDS
+
+After the pipeline finishes on Gadi, use the packaged Gadi-to-RDS upload helper:
+
+- `scripts/transfer_gadi_to_rds.sh`: the transfer helper
+- `scripts/jobsubmission_transfer_gadi_to_rds.pbs`: the PBS wrapper to submit on Gadi
+
+The recommended submission pattern is shell `export ...` followed by `qsub -V`.
+This avoids the PBS environment-size problems that can happen with `qsub -v`,
+especially when `RDS_INCLUDE_DIRS` contains multiple comma-separated paths.
+
+The packaged wrapper now defaults these paths onto scratch when you do not
+override them:
+
+- `DEBUG_LOG_DIR=/scratch/rg42/${USER}/transfer_logs`
+- `RDS_UPLOAD_MANIFEST_DIR=/scratch/rg42/${USER}/.rds_transfer_manifests`
+
+The packaged wrapper also skips these by default unless you override the
+settings:
+
+- `RDS_EXCLUDE_DIRS=_work`
+- `RDS_EXCLUDE_FILES=.nextflow.log,.nextflow.log.*`
+
+By default, the detailed `transfer_gadi_to_rds.*.run.log` is deleted after a
+successful transfer so scratch does not fill with stale debug traces. If you
+want to keep that helper log for a successful run, set `KEEP_DEBUG_LOG=1`
+before `qsub`.
+
+### Copy A Finished Batch Results Root
+
+Copy an existing finished results folder such as `/scratch/rg42/AGAR/intermediates/2025/B07`
+back to the matching RDS location:
+
+```bash
+export SRC_PATH=/scratch/rg42/AGAR/intermediates/2025/B07
+export RDS_DEST=/rds/PRJ-AGAR/PRJ-AGAR/intermediates/2025/B07
+export DEBUG_LOG_DIR=/scratch/rg42/${USER}/transfer_logs
+export RDS_UPLOAD_MANIFEST_DIR=/scratch/rg42/${USER}/.rds_transfer_manifests
+mkdir -p "$DEBUG_LOG_DIR" "$RDS_UPLOAD_MANIFEST_DIR"
+qsub -V /g/data/rg42/agar-bactopia-pipeline/scripts/jobsubmission_transfer_gadi_to_rds.pbs
+```
+
+### Copy Only The Main Deliverables First
+
+If you want the most useful outputs copied first, keep the source rooted at the
+results folder and narrow the upload with `RDS_INCLUDE_DIRS`. The helper also
+prioritizes `AGRF_samplesheet_with_results.tsv` first and then any
+`*_consolidated/` directory before lower-priority files.
+
+```bash
+export SRC_PATH=/scratch/rg42/AGAR/intermediates/2025/B07
+export RDS_DEST=/rds/PRJ-AGAR/PRJ-AGAR/intermediates/2025/B07
+export RDS_INCLUDE_DIRS='AGRF_samplesheet_with_results.tsv,batch_bactopia_consolidated'
+export DEBUG_LOG_DIR=/scratch/rg42/${USER}/transfer_logs
+export RDS_UPLOAD_MANIFEST_DIR=/scratch/rg42/${USER}/.rds_transfer_manifests
+mkdir -p "$DEBUG_LOG_DIR" "$RDS_UPLOAD_MANIFEST_DIR"
+qsub -V /g/data/rg42/agar-bactopia-pipeline/scripts/jobsubmission_transfer_gadi_to_rds.pbs
+```
+
+### Useful Transfer Controls
+
+- `RDS_IGNORE_MANIFEST=1` forces a requeue when files were already recorded in
+  the upload manifest but need to be uploaded again.
+- `RDS_PRIORITIZE_UPLOADS=0` skips the extra ranking step and can help on very
+  large trees with many small files.
+- `RDS_INCLUDE_DIRS` is source-relative and prefix-based. It works for exact
+  file paths too, but not shell globs like `*_bracken_only`.
+- `RDS_EXCLUDE_DIRS` defaults to `_work`, so noisy workflow scratch directories
+  are skipped by default.
+- `RDS_EXCLUDE_FILES` defaults to `.nextflow.log,.nextflow.log.*`, so those
+  Nextflow log files are skipped by default.
+- `RDS_EXCLUDE_PATHS` is available when you want to exclude specific
+  source-relative paths rather than whole directory prefixes or basename
+  patterns.
+
 ## Metadata Sheet Requirements
 
 The submit wrapper expects exactly one metadata sheet matching

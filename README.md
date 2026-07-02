@@ -103,10 +103,15 @@ Notes:
   belongs under `/scratch/rg42/AGAR/metadata/...`
 - the metadata directory should contain a text file matching
   `*_samplesheet.txt`
-- that metadata sheet must contain the columns `Sample name` and `Comments`
-- `Sample name` must match the final sample ids used in the FOFN
-- `Comments` should include the free-text phenotype or organism name used by
-  the downstream MLST review and mapping steps
+- that metadata sheet should preferably contain the columns `Sample name` and
+  `Comments`
+- if those headers are missing, the mapper uses the first metadata column as
+  `Sample name` and the second as `Comments`
+- `Sample name`, or the first metadata column when those headers are missing,
+  must match the final sample ids used in the FOFN
+- `Comments`, or the second metadata column when those headers are missing,
+  should include the free-text phenotype or organism name used by the
+  downstream MLST review and mapping steps
 
 ### Downloading Data From RDS
 
@@ -167,12 +172,15 @@ written under paths such as `batch_bactopia_001`,
 `batch_bactopia_001_tools`, and `batch_bactopia_consolidated` unless you
 override `BATCH_PREFIX`.
 
-Required metadata columns:
+Preferred metadata columns:
 
 - `Sample name`: sample identifier used to join metadata back onto the
   consolidated Bactopia outputs
 - `Comments`: free-text phenotype or organism name used by the MLST review
   logic
+
+If either header is missing, the mapper falls back to the first metadata column
+as `Sample name` and the second as `Comments`.
 
 For non-AGAR projects, sample names are not rewritten by the launcher. When
 `IS_AGAR_PROJECT=0` or auto-detection resolves the input as non-AGAR, the
@@ -196,8 +204,9 @@ How non-AGAR sample names are managed:
   from each FASTQ basename before the first underscore in `*_R1.fastq.gz`
 - if you provide an existing `samplesheet.fofn`, its `sample` values are used
   as provided
-- in both cases, the metadata `Sample name` column must match the final sample
-  names in the FOFN because no AGAR-specific renaming is applied
+- in both cases, the metadata `Sample name` column, or the first metadata
+  column when those headers are missing, must match the final sample names in
+  the FOFN because no AGAR-specific renaming is applied
 
 All other metadata columns are ignored by the metadata-mapping step. They may
 still be kept in your source sheet for lab bookkeeping, but they are not
@@ -369,6 +378,12 @@ Important requirements:
 - for non-`rg42` or non-Gadi installs, see `For Non-Gadi And Non-rg42 Users`
   below for local installation guidance
 
+If ST131Typer has already been run and the existing output directory
+`<RESULTS_ROOT>/<basename(RESULTS_ROOT)>_st131typer` is present, you can reuse
+that directory during workbook export without submitting a new ST131Typer job by
+setting `USE_EXISTING_ST131_TYPER=1`. You can override the directory with
+`ST131_TYPER_OUTPUT_DIR=/absolute/path/to/existing_st131typer_dir`.
+
 If you only want to run ST131Typer later against an existing assemblies folder
 and append its summary into the final workbook, use:
 
@@ -410,6 +425,10 @@ Turn on the extra non-core typing and screening tools for the run.
 
 For faster completion, submit one non-Kleborate tool job per tool after
 assembly.
+
+**Use `RUN_TOOLS_PARALLEL=1` when you want to speed up the run. This can reduce
+wall-clock time when the cluster is quiet enough, or when your project has
+enough free capacity for those tool jobs to run concurrently.**
 
 ```bash
 RUN_TOOLS_PARALLEL=1 \
@@ -511,6 +530,24 @@ POSTPROCESS_ONLY=1 \
 RUN_CONSOLIDATE=1 \
 RUN_MLST_REVIEW=1 \
 RUN_EXPORT_RESULTS_WORKBOOK=1 \
+/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
+  /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
+  /scratch/rg42/AGAR/metadata/2025/B07 \
+  /scratch/rg42/AGAR/intermediates/2025/B07 \
+  50
+```
+
+### Reuse Existing ST131Typer Output During Workbook Export
+
+If `RESULTS_ROOT` already contains a matching `*_st131typer` directory, reuse
+it during workbook export without submitting a new ST131Typer job.
+
+```bash
+POSTPROCESS_ONLY=1 \
+RUN_CONSOLIDATE=0 \
+RUN_MLST_REVIEW=0 \
+RUN_EXPORT_RESULTS_WORKBOOK=1 \
+USE_EXISTING_ST131_TYPER=1 \
 /g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
   /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
   /scratch/rg42/AGAR/metadata/2025/B07 \

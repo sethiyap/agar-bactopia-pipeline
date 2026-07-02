@@ -19,7 +19,9 @@ usage <- function() {
     "  --bracken <file>\n",
     "\n",
     "Notes:\n",
-    "  - Metadata sheet must contain 'Sample name' and 'Comments' columns.\n",
+    "  - Metadata headers 'Sample name' and 'Comments' are preferred.\n",
+    "  - If those headers are missing, the first metadata column is treated as\n",
+    "    'Sample name' and the second as 'Comments'.\n",
     "  - All other metadata columns are ignored by this script.\n",
     "  - If explicit result files are not provided, the script tries to locate\n",
     "    consolidated tool tables under --consolidated-dir.\n",
@@ -113,6 +115,12 @@ normalize_sample <- function(x) {
   x[nchar(x) == 0L] <- NA_character_
   x <- sub("\\.(fna|fa|fasta)(\\.gz)?$", "", x, ignore.case = TRUE)
   x
+}
+
+normalize_header <- function(x) {
+  x <- trimws(as.character(x))
+  x <- gsub("\\s+", " ", x)
+  tolower(x)
 }
 
 find_first_existing <- function(paths) {
@@ -267,6 +275,13 @@ read_agrf_sheet <- function(path) {
   )
   dat <- read_table_flex(path)
 
+  if (ncol(dat) < 2L) {
+    stop(
+      "Metadata sheet must contain at least two columns so the first can be used as 'Sample name' and the second as 'Comments'.",
+      call. = FALSE
+    )
+  }
+
   if (anyDuplicated(names(dat))) {
     dupes <- unique(names(dat)[duplicated(names(dat))])
     stop(
@@ -276,18 +291,24 @@ read_agrf_sheet <- function(path) {
     )
   }
 
-  missing_cols <- setdiff(required_cols, names(dat))
-  if (length(missing_cols)) {
-    stop(
-      "Metadata sheet must contain exactly these required columns: ",
-      paste(required_cols, collapse = ", "),
-      ". Missing: ",
-      paste(missing_cols, collapse = ", "),
-      call. = FALSE
+  header_keys <- normalize_header(names(dat))
+  required_keys <- normalize_header(required_cols)
+  required_idx <- match(required_keys, header_keys)
+
+  if (all(!is.na(required_idx))) {
+    dat <- dat[required_idx]
+    names(dat) <- required_cols
+  } else {
+    fallback_names <- names(dat)[seq_len(2L)]
+    message(
+      "Metadata sheet is missing the preferred 'Sample name' and/or 'Comments' headers. ",
+      "Using first column '", fallback_names[[1]], "' as 'Sample name' and second column '",
+      fallback_names[[2]], "' as 'Comments'."
     )
+    dat <- dat[seq_len(2L)]
+    names(dat) <- required_cols
   }
 
-  dat <- dat[required_cols]
   dat[["Comments"]] <- as.character(dat[["Comments"]])
   dat$sample <- normalize_sample(dat[["Sample name"]])
   dat

@@ -25,7 +25,9 @@ What this script does:
 Inputs:
   RAW_FASTQ_DIR  Raw FASTQ directory, for example /scratch/rg42/AGAR/rawdata/2025/B05
   METADATA_DIR   Metadata directory containing *_samplesheet.txt and/or samplesheet.fofn
-                 The metadata sheet must contain 'Sample name' and 'Comments'.
+                 The mapper prefers 'Sample name' and 'Comments' headers.
+                 If they are missing, the first metadata column is treated as
+                 'Sample name' and the second as 'Comments'.
                  Other metadata columns are ignored by downstream metadata mapping.
   RESULTS_ROOT   Intermediate results directory, for example /scratch/rg42/AGAR/intermediates/2025/B05
   BATCH_SIZE     Default: 50. The split keeps each PBS batch job manageable on
@@ -57,6 +59,8 @@ Environment variables:
   RUN_POST_REVIEW_MAP    Default: 0. Set to 1 only if you explicitly want a
                          second AGRF remap driven by mlst_review.tsv
   RUN_ST131_TYPER        Default: 0. Set to 1 to run ST131Typer after assemblies
+  USE_EXISTING_ST131_TYPER Default: 0. Set to 1 to reuse an existing
+                         ST131_TYPER_OUTPUT_DIR during workbook export
   RUN_EXPORT_RESULTS_WORKBOOK Default: 1. Set to 0 to skip final Excel workbook export
   CHECK_INODE_QUOTA      Default: 1. Set to 0 to skip the inode preflight check
   INODE_FS_WARN_FREE_PCT Default: 15. Warn if df reports less free inode percent
@@ -159,6 +163,7 @@ map_agrf_results=${MAP_AGRF_RESULTS:-1}
 run_mlst_review=${RUN_MLST_REVIEW:-1}
 run_post_review_map=${RUN_POST_REVIEW_MAP:-0}
 run_st131typer=${RUN_ST131_TYPER:-0}
+use_existing_st131typer=${USE_EXISTING_ST131_TYPER:-0}
 run_export_results_workbook=${RUN_EXPORT_RESULTS_WORKBOOK:-1}
 map_output=${MAP_OUTPUT:-$results_root_arg/AGRF_samplesheet_with_results.tsv}
 review_output_dir=${REVIEW_OUTPUT_DIR:-$results_root_arg/mlst_review_standalone}
@@ -569,6 +574,13 @@ if [[ $run_st131typer == 1 ]]; then
   log "INFO" "Found ST131Typer.sh at: $st131typer_script"
 fi
 
+if [[ $use_existing_st131typer == 1 && $run_st131typer != 1 ]]; then
+  if [[ ! -d $st131typer_output_dir ]]; then
+    fail "USE_EXISTING_ST131_TYPER=1 requires an existing ST131_TYPER_OUTPUT_DIR: $st131typer_output_dir"
+  fi
+  log "INFO" "Using existing ST131Typer output directory for workbook export: $st131typer_output_dir"
+fi
+
 if [[ $postprocess_only != 1 ]]; then
   current_step="checking raw FASTQ inputs"
   fastq_count=$(find "$raw_fastq_dir" -maxdepth 1 -type f \( -name "*.fastq.gz" -o -name "*.fq.gz" \) | wc -l | tr -d ' ')
@@ -781,7 +793,7 @@ if [[ $run_export_results_workbook == 1 ]]; then
       workbook_dependency_job=$st131typer_job_id
     fi
   fi
-  if [[ $run_st131typer == 1 ]]; then
+  if [[ $run_st131typer == 1 || $use_existing_st131typer == 1 ]]; then
     workbook_st131_env=",ST131_TYPER_DIR=${st131typer_output_dir}"
   fi
   workbook_job_id=$(scheduler_submit \

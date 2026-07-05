@@ -14,7 +14,7 @@ Usage:
 Optional environment variables:
   RDS_DEST             Overrides the interactive RDS destination prompt
   RDS_SFTP_HOST        Default: research-data-ext.sydney.edu.au
-  RDS_SFTP_USER        Default: pset4184
+  RDS_SFTP_USER        Required RDS username for sftp login
   RDS_SFTP_OPTS        Extra options passed to sftp, for example: -v
   RDS_SFTP_CHUNK_SIZE  Number of files per SFTP session, default: 100
   RDS_UPLOAD_MANIFEST  Persistent uploaded-files manifest path
@@ -38,7 +38,7 @@ fi
 src_path=${1:-}
 dest=${2:-${RDS_DEST:-}}
 host=${RDS_SFTP_HOST:-research-data-ext.sydney.edu.au}
-user=${RDS_SFTP_USER:-pset4184}
+user=${RDS_SFTP_USER:-}
 sftp_opts=${RDS_SFTP_OPTS:-}
 chunk_size=${RDS_SFTP_CHUNK_SIZE:-100}
 manifest_path=${RDS_UPLOAD_MANIFEST:-}
@@ -58,12 +58,21 @@ if [[ -z $dest ]]; then
   read -r -p 'RDS destination folder: ' dest
 fi
 
+if [[ -z $user ]]; then
+  if [[ -t 0 ]]; then
+    read -r -p 'RDS SFTP username: ' user
+  else
+    echo "RDS_SFTP_USER is required." >&2
+    exit 1
+  fi
+fi
+
 if [[ -z $copy_since_raw && -t 0 ]]; then
   read -r -p 'Copy only files newer than timestamp (YYYY-MM-DD [HH:MM:SS], leave blank for all): ' copy_since_raw
 fi
 
-if [[ -z $src_path || -z $dest ]]; then
-  echo "Gadi source path and RDS destination folder are required." >&2
+if [[ -z $src_path || -z $dest || -z $user ]]; then
+  echo "Gadi source path, RDS destination folder, and RDS_SFTP_USER are required." >&2
   exit 1
 fi
 

@@ -12,6 +12,7 @@
 # Usage on Gadi:
 #   export SRC_PATH=/scratch/rg42/AGAR/intermediates/2025/B07
 #   export RDS_DEST=/rds/PRJ-AGAR/PRJ-AGAR/intermediates/2025/B07
+#   export RDS_SFTP_USER=<your_rds_username>
 #   export DEBUG_LOG_DIR=/scratch/rg42/${USER}/transfer_logs
 #   export RDS_UPLOAD_MANIFEST_DIR=/scratch/rg42/${USER}/.rds_transfer_manifests
 #   qsub -V /g/data/rg42/agar-bactopia-pipeline/scripts/jobsubmission_transfer_gadi_to_rds.pbs
@@ -31,6 +32,7 @@ KEEP_DEBUG_LOG=${KEEP_DEBUG_LOG:-0}
 
 SRC_PATH=${SRC_PATH:-}
 RDS_DEST=${RDS_DEST:-}
+RDS_SFTP_USER=${RDS_SFTP_USER:-}
 RDS_SFTP_OPTS=${RDS_SFTP_OPTS:-}
 RDS_SFTP_CHUNK_SIZE=${RDS_SFTP_CHUNK_SIZE:-2000}
 RDS_IGNORE_MANIFEST=${RDS_IGNORE_MANIFEST:-0}
@@ -44,11 +46,12 @@ TRANSFER_SCRIPT=${TRANSFER_SCRIPT:-$script_dir/transfer_gadi_to_rds.sh}
 
 mkdir -p "$RDS_UPLOAD_MANIFEST_DIR"
 
-if [[ -z $SRC_PATH || -z $RDS_DEST ]]; then
-  echo "SRC_PATH and RDS_DEST must be set before submitting this PBS job." >&2
+if [[ -z $SRC_PATH || -z $RDS_DEST || -z $RDS_SFTP_USER ]]; then
+  echo "SRC_PATH, RDS_DEST, and RDS_SFTP_USER must be set before submitting this PBS job." >&2
   echo "Use exported variables followed by qsub -V, for example:" >&2
   echo "  export SRC_PATH=/scratch/rg42/AGAR/intermediates/2025/B07" >&2
   echo "  export RDS_DEST=/rds/PRJ-AGAR/PRJ-AGAR/intermediates/2025/B07" >&2
+  echo "  export RDS_SFTP_USER=<your_rds_username>" >&2
   echo "  qsub -V $script_dir/jobsubmission_transfer_gadi_to_rds.pbs" >&2
   exit 1
 fi
@@ -72,6 +75,7 @@ echo "  RDS_UPLOAD_MANIFEST_DIR=$RDS_UPLOAD_MANIFEST_DIR"
 echo "  KEEP_DEBUG_LOG=$KEEP_DEBUG_LOG"
 echo "  SRC_PATH=$SRC_PATH"
 echo "  RDS_DEST=$RDS_DEST"
+echo "  RDS_SFTP_USER=$RDS_SFTP_USER"
 echo "  RDS_SFTP_CHUNK_SIZE=$RDS_SFTP_CHUNK_SIZE"
 echo "  RDS_IGNORE_MANIFEST=$RDS_IGNORE_MANIFEST"
 echo "  RDS_PRIORITIZE_UPLOADS=$RDS_PRIORITIZE_UPLOADS"
@@ -88,6 +92,7 @@ ls -ld "$RDS_UPLOAD_MANIFEST_DIR"
 
 set +e
 RDS_UPLOAD_MANIFEST_DIR="$RDS_UPLOAD_MANIFEST_DIR" \
+RDS_SFTP_USER="$RDS_SFTP_USER" \
 RDS_SFTP_OPTS="$RDS_SFTP_OPTS" \
 RDS_SFTP_CHUNK_SIZE="$RDS_SFTP_CHUNK_SIZE" \
 RDS_IGNORE_MANIFEST="$RDS_IGNORE_MANIFEST" \

@@ -172,6 +172,10 @@ The recommended submission pattern is shell `export ...` followed by `qsub -V`.
 This avoids the PBS environment-size problems that can happen with `qsub -v`,
 especially when `RDS_INCLUDE_DIRS` contains multiple comma-separated paths.
 
+You must set `RDS_SFTP_USER` explicitly for uploads. The packaged helper keeps
+the RDS host default, but it does not hardcode any personal username or
+password.
+
 The packaged wrapper now defaults these paths onto scratch when you do not
 override them:
 
@@ -189,6 +193,10 @@ successful transfer so scratch does not fill with stale debug traces. If you
 want to keep that helper log for a successful run, set `KEEP_DEBUG_LOG=1`
 before `qsub`.
 
+For authentication, `sftp` will usually prompt for your RDS password unless
+your Gadi session already has working SSH key or agent-based authentication for
+that RDS endpoint.
+
 ### Copy A Finished Batch Results Root
 
 Copy an existing finished results folder such as `/scratch/rg42/AGAR/intermediates/2025/B07`
@@ -197,6 +205,7 @@ back to the matching RDS location:
 ```bash
 export SRC_PATH=/scratch/rg42/AGAR/intermediates/2025/B07
 export RDS_DEST=/rds/PRJ-AGAR/PRJ-AGAR/intermediates/2025/B07
+export RDS_SFTP_USER=<your_rds_username>
 export DEBUG_LOG_DIR=/scratch/rg42/${USER}/transfer_logs
 export RDS_UPLOAD_MANIFEST_DIR=/scratch/rg42/${USER}/.rds_transfer_manifests
 mkdir -p "$DEBUG_LOG_DIR" "$RDS_UPLOAD_MANIFEST_DIR"
@@ -213,6 +222,7 @@ prioritizes `AGRF_samplesheet_with_results.tsv` first and then any
 ```bash
 export SRC_PATH=/scratch/rg42/AGAR/intermediates/2025/B07
 export RDS_DEST=/rds/PRJ-AGAR/PRJ-AGAR/intermediates/2025/B07
+export RDS_SFTP_USER=<your_rds_username>
 export RDS_INCLUDE_DIRS='AGRF_samplesheet_with_results.tsv,batch_bactopia_consolidated'
 export DEBUG_LOG_DIR=/scratch/rg42/${USER}/transfer_logs
 export RDS_UPLOAD_MANIFEST_DIR=/scratch/rg42/${USER}/.rds_transfer_manifests

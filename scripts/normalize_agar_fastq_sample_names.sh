@@ -19,10 +19,16 @@ Valid sample name examples:
   25GNB-1317R
 
 If the sample name does not match the valid pattern, the script tries to fix it
-by replacing underscores with hyphens in the sample name only.
+by replacing underscores with hyphens in the sample name and uppercasing a
+lowercase `gnb` prefix.
 
 Example:
   25GNB_1363_AAJ3GMMM5_CCTTGGCATC-GACCGATTCG_L001_R1.fastq.gz
+becomes:
+  25GNB-1363_AAJ3GMMM5_CCTTGGCATC-GACCGATTCG_L001_R1.fastq.gz
+
+And:
+  25gnb-1363_AAJ3GMMM5_CCTTGGCATC-GACCGATTCG_L001_R1.fastq.gz
 becomes:
   25GNB-1363_AAJ3GMMM5_CCTTGGCATC-GACCGATTCG_L001_R1.fastq.gz
 
@@ -84,7 +90,7 @@ if [[ -z $log_file ]]; then
   log_file="${fastq_dir%/}/sample_name_validation.log"
 fi
 
-for cmd in find mv basename dirname; do
+for cmd in find mv basename dirname stat; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "Required command not found: $cmd" >&2
     exit 1
@@ -95,6 +101,14 @@ printf 'status\tchanged_at_source\toriginal_filename\tfinal_filename\tnote\n' > 
 
 write_log() {
   printf '%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" "$5" >> "$log_file"
+}
+
+path_id() {
+  if stat -f '%d:%i' "$1" >/dev/null 2>&1; then
+    stat -f '%d:%i' "$1"
+  else
+    stat -c '%d:%i' "$1"
+  fi
 }
 
 valid_pattern='^[0-9]{2}GNB-[0-9]+R?$'
@@ -130,10 +144,14 @@ while IFS= read -r -d '' path; do
   fi
 
   fixed_sample_name=${sample_name//_/-}
+  if [[ $fixed_sample_name =~ ^([0-9]{2})[gG][nN][bB]-(.+)$ ]]; then
+    fixed_sample_name="${BASH_REMATCH[1]}GNB-${BASH_REMATCH[2]}"
+  fi
+
   if [[ ! $fixed_sample_name =~ $valid_pattern ]]; then
     echo "INVALID $base"
-    echo "        sample name '$sample_name' does not match and cannot be fixed with '_' -> '-'" >&2
-    write_log "INVALID" "unknown" "$base" "$base" "sample name '$sample_name' cannot be fixed with '_' -> '-'"
+    echo "        sample name '$sample_name' does not match and cannot be fixed with '_' -> '-' and 'gnb' -> 'GNB'" >&2
+    write_log "INVALID" "unknown" "$base" "$base" "sample name '$sample_name' cannot be fixed with '_' -> '-' and 'gnb' -> 'GNB'"
     invalid=$((invalid + 1))
     continue
   fi
@@ -141,7 +159,7 @@ while IFS= read -r -d '' path; do
   new_base="${fixed_sample_name}_${flowcell}_${barcode}_L${lane}_R${read_pair}.${extension}.gz"
   new_path="$dir/$new_base"
 
-  if [[ -e $new_path ]]; then
+  if [[ -e $new_path ]] && [[ $(path_id "$path") != $(path_id "$new_path") ]]; then
     echo "CONFLICT $base"
     echo "        target already exists: $new_base" >&2
     write_log "CONFLICT" "yes" "$base" "$new_base" "target already exists"

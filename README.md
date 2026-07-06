@@ -278,6 +278,9 @@ those other FASTQs from `samplesheet.fofn`. The default AGAR regex is
 `^[0-9]{2}GNB-[0-9]+R?$`, so mixed folders do not carry non-AGAR sample names
 forward unless you provide a custom `samplesheet.fofn` or override the regex
 explicitly.
+Before that validation step, the AGAR filename normalizer can repair sample
+prefixes by replacing `_` with `-` and converting lowercase `gnb` to uppercase
+`GNB`.
 
 At the public wrapper layer you can force the mode with
 `--is-agar-project auto|1|0`, for example `--is-agar-project 0` for non-AGAR

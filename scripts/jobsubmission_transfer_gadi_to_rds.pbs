@@ -13,6 +13,7 @@
 #   export SRC_PATH=/scratch/rg42/AGAR/intermediates/2025/B07
 #   export RDS_DEST=/rds/PRJ-AGAR/PRJ-AGAR/intermediates/2025/B07
 #   export RDS_SFTP_USER=<your_rds_username>
+#   export TRANSFER_SCRIPT=/g/data/rg42/agar-bactopia-pipeline/scripts/transfer_gadi_to_rds.sh
 #   export DEBUG_LOG_DIR=/scratch/rg42/${USER}/transfer_logs
 #   export RDS_UPLOAD_MANIFEST_DIR=/scratch/rg42/${USER}/.rds_transfer_manifests
 #   qsub -V /g/data/rg42/agar-bactopia-pipeline/scripts/jobsubmission_transfer_gadi_to_rds.pbs
@@ -42,7 +43,21 @@ RDS_EXCLUDE_DIRS=${RDS_EXCLUDE_DIRS:-_work}
 RDS_EXCLUDE_FILES=${RDS_EXCLUDE_FILES:-.nextflow.log,.nextflow.log.*}
 RDS_EXCLUDE_PATHS=${RDS_EXCLUDE_PATHS:-}
 RDS_COPY_SINCE=${RDS_COPY_SINCE:-}
-TRANSFER_SCRIPT=${TRANSFER_SCRIPT:-$script_dir/transfer_gadi_to_rds.sh}
+TRANSFER_SCRIPT=${TRANSFER_SCRIPT:-}
+
+if [[ -z $TRANSFER_SCRIPT ]]; then
+  spool_candidate="$script_dir/transfer_gadi_to_rds.sh"
+  if [[ -x $spool_candidate ]]; then
+    TRANSFER_SCRIPT=$spool_candidate
+  else
+    echo "TRANSFER_SCRIPT is not set, and the default sibling helper was not found." >&2
+    echo "PBS is running this wrapper from its internal spool directory:" >&2
+    echo "  $script_dir" >&2
+    echo "Set TRANSFER_SCRIPT explicitly before qsub, for example:" >&2
+    echo "  export TRANSFER_SCRIPT=/g/data/rg42/agar-bactopia-pipeline/scripts/transfer_gadi_to_rds.sh" >&2
+    exit 1
+  fi
+fi
 
 mkdir -p "$RDS_UPLOAD_MANIFEST_DIR"
 
@@ -63,6 +78,7 @@ fi
 
 if [[ ! -x $TRANSFER_SCRIPT ]]; then
   echo "Transfer script not found or not executable: $TRANSFER_SCRIPT" >&2
+  echo "Set TRANSFER_SCRIPT to the real helper path before qsub." >&2
   exit 1
 fi
 

@@ -197,39 +197,6 @@ For authentication, `sftp` will usually prompt for your RDS password unless
 your Gadi session already has working SSH key or agent-based authentication for
 that RDS endpoint.
 
-### Copy A Finished Batch Results Root
-
-Copy an existing finished results folder such as `/scratch/rg42/AGAR/intermediates/2025/B07`
-back to the matching RDS location:
-
-```bash
-export SRC_PATH=/scratch/rg42/AGAR/intermediates/2025/B07
-export RDS_DEST=/rds/PRJ-AGAR/PRJ-AGAR/intermediates/2025/B07
-export RDS_SFTP_USER=<your_rds_username>
-export DEBUG_LOG_DIR=/scratch/rg42/${USER}/transfer_logs
-export RDS_UPLOAD_MANIFEST_DIR=/scratch/rg42/${USER}/.rds_transfer_manifests
-mkdir -p "$DEBUG_LOG_DIR" "$RDS_UPLOAD_MANIFEST_DIR"
-qsub -V /g/data/rg42/agar-bactopia-pipeline/scripts/jobsubmission_transfer_gadi_to_rds.pbs
-```
-
-### Copy Only The Main Deliverables First
-
-If you want the most useful outputs copied first, keep the source rooted at the
-results folder and narrow the upload with `RDS_INCLUDE_DIRS`. The helper also
-prioritizes `AGRF_samplesheet_with_results.tsv` first and then any
-`*_consolidated/` directory before lower-priority files.
-
-```bash
-export SRC_PATH=/scratch/rg42/AGAR/intermediates/2025/B07
-export RDS_DEST=/rds/PRJ-AGAR/PRJ-AGAR/intermediates/2025/B07
-export RDS_SFTP_USER=<your_rds_username>
-export RDS_INCLUDE_DIRS='AGRF_samplesheet_with_results.tsv,batch_bactopia_consolidated'
-export DEBUG_LOG_DIR=/scratch/rg42/${USER}/transfer_logs
-export RDS_UPLOAD_MANIFEST_DIR=/scratch/rg42/${USER}/.rds_transfer_manifests
-mkdir -p "$DEBUG_LOG_DIR" "$RDS_UPLOAD_MANIFEST_DIR"
-qsub -V /g/data/rg42/agar-bactopia-pipeline/scripts/jobsubmission_transfer_gadi_to_rds.pbs
-```
-
 ### Useful Transfer Controls
 
 - `RDS_IGNORE_MANIFEST=1` forces a requeue when files were already recorded in
@@ -453,8 +420,15 @@ Important requirements:
 
 - `RUN_ST131_TYPER=1` is required. If you do not set it, no ST131Typer job is
   submitted.
-- `RUN_COLLECT_ASSEMBLIES=1` must remain enabled because ST131Typer runs after
-  the assemblies folder is created.
+- `RUN_COLLECT_ASSEMBLIES=1` must remain enabled unless you explicitly point
+  `ST131_TYPER_INPUT_DIR` at an existing assemblies directory.
+- when you launch through `submit_agar_full_pipeline.sh` or
+  `bin/agar-bactopia submit gadi`, the core batch workflow, consolidation, AGRF
+  mapping, and MLST review chain now finish first; only then does the launcher
+  collect flattened assemblies and submit ST131Typer
+- set `ST131_APPEND_AFTER_WORKBOOK=1` if you want the main workbook first, then
+  a delayed ST131Typer run, then an append-only workbook update that adds the
+  `st131typer_summary` sheet afterward
 - if ST131Typer is installed outside the pipeline repo, define
   `ST131_TYPER_DIR=/absolute/path/to/ST131Typer`
 - `ST131Typer.sh` must be available, by default at `<repo_root>/ST131Typer.sh`,
@@ -463,6 +437,9 @@ Important requirements:
 - the standalone append helper also defaults `ST131_TYPER_SCRIPT` to
   `<repo_root>/ST131Typer.sh`, so you can run it from outside the repo checkout
   as long as that script exists in the cloned pipeline root
+- the ST131 wrapper now writes `st131typer.stdout.log` and
+  `st131typer.stderr.log` into `ST131_TYPER_OUTPUT_DIR` and fails the PBS job if
+  `summary.txt` is missing or empty
 - for non-`rg42` or non-Gadi installs, see `For Non-Gadi And Non-rg42 Users`
   below for local installation guidance
 
@@ -645,12 +622,30 @@ USE_EXISTING_ST131_TYPER=1 \
 
 ### Run ST131Typer During The Main Submission
 
-Submit ST131Typer after the assemblies folder is created as part of the main
-pipeline dependency chain.
+Submit ST131Typer as part of the main AGAR launcher flow. The top-level launcher
+now waits for the core workflow, consolidation, AGRF mapping, and MLST review
+chain to finish, then collects the flattened assemblies folder and submits
+ST131Typer before the final workbook export.
 
 ```bash
 ST131_TYPER_DIR=/g/data/rg42/ST131Typer \
 RUN_ST131_TYPER=1 \
+/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
+  /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
+  /scratch/rg42/AGAR/metadata/2025/B07 \
+  /scratch/rg42/AGAR/intermediates/2025/B07 \
+  50
+```
+
+### Export Workbook First, Then Append ST131Typer
+
+If you want the main summarized workbook as early as possible, export it first,
+then run ST131Typer afterward and append only the `st131typer_summary` sheet.
+
+```bash
+ST131_TYPER_DIR=/g/data/rg42/ST131Typer \
+RUN_ST131_TYPER=1 \
+ST131_APPEND_AFTER_WORKBOOK=1 \
 /g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
   /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
   /scratch/rg42/AGAR/metadata/2025/B07 \
@@ -823,6 +818,39 @@ Review columns:
 
 If a reviewed table is available, the standalone MLST values are written back
 into `mlst_scheme`, `mlst_st`, and `mlst_profile` in the reviewed TSV.
+
+### Copy A Finished Batch Results Root
+
+Copy an existing finished results folder such as `/scratch/rg42/AGAR/intermediates/2025/B07`
+back to the matching RDS location:
+
+```bash
+export SRC_PATH=/scratch/rg42/AGAR/intermediates/2025/B07
+export RDS_DEST=/rds/PRJ-AGAR/PRJ-AGAR/intermediates/2025/B07
+export RDS_SFTP_USER=<your_rds_username>
+export DEBUG_LOG_DIR=/scratch/rg42/${USER}/transfer_logs
+export RDS_UPLOAD_MANIFEST_DIR=/scratch/rg42/${USER}/.rds_transfer_manifests
+mkdir -p "$DEBUG_LOG_DIR" "$RDS_UPLOAD_MANIFEST_DIR"
+qsub -V /g/data/rg42/agar-bactopia-pipeline/scripts/jobsubmission_transfer_gadi_to_rds.pbs
+```
+
+### Copy Only The Main Deliverables First
+
+If you want the most useful outputs copied first, keep the source rooted at the
+results folder and narrow the upload with `RDS_INCLUDE_DIRS`. The helper also
+prioritizes `AGRF_samplesheet_with_results.tsv` first and then any
+`*_consolidated/` directory before lower-priority files.
+
+```bash
+export SRC_PATH=/scratch/rg42/AGAR/intermediates/2025/B07
+export RDS_DEST=/rds/PRJ-AGAR/PRJ-AGAR/intermediates/2025/B07
+export RDS_SFTP_USER=<your_rds_username>
+export RDS_INCLUDE_DIRS='AGRF_samplesheet_with_results.tsv,batch_bactopia_consolidated'
+export DEBUG_LOG_DIR=/scratch/rg42/${USER}/transfer_logs
+export RDS_UPLOAD_MANIFEST_DIR=/scratch/rg42/${USER}/.rds_transfer_manifests
+mkdir -p "$DEBUG_LOG_DIR" "$RDS_UPLOAD_MANIFEST_DIR"
+qsub -V /g/data/rg42/agar-bactopia-pipeline/scripts/jobsubmission_transfer_gadi_to_rds.pbs
+```
 
 ## For Non-Gadi And Non-`rg42` Users
 

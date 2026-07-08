@@ -21,6 +21,8 @@ What this script does:
   3. Validate the FOFN
   4. Submit the batch workflow
   5. Submit metadata-sheet result mapping after consolidation completes
+  6. When enabled, collect flattened assemblies and run ST131Typer after the
+     main post-processing chain finishes
 
 Inputs:
   RAW_FASTQ_DIR  Raw FASTQ directory, for example /scratch/rg42/AGAR/rawdata/2025/B05
@@ -58,7 +60,16 @@ Environment variables:
   RUN_MLST_REVIEW        Default: 1. Set to 0 to skip the standalone MLST review follow-up
   RUN_POST_REVIEW_MAP    Default: 0. Set to 1 only if you explicitly want a
                          second AGRF remap driven by mlst_review.tsv
-  RUN_ST131_TYPER        Default: 0. Set to 1 to run ST131Typer after assemblies
+  RUN_COLLECT_ASSEMBLIES Default: 1. When enabled, the top-level AGAR launcher
+                         now waits until the core workflow, consolidation,
+                         mapping, and MLST review chain finish before collecting
+                         flattened assemblies
+  RUN_ST131_TYPER        Default: 0. Set to 1 to run ST131Typer after the
+                         post-processing chain finishes and the assemblies
+                         folder is ready
+  ST131_APPEND_AFTER_WORKBOOK Default: 0. Set to 1 to export the main workbook
+                         first, then run ST131Typer, then append the
+                         `st131typer_summary` sheet into that existing workbook
   USE_EXISTING_ST131_TYPER Default: 0. Set to 1 to reuse an existing
                          ST131_TYPER_OUTPUT_DIR during workbook export
   RUN_EXPORT_RESULTS_WORKBOOK Default: 1. Set to 0 to skip final Excel workbook export
@@ -74,6 +85,8 @@ Environment variables:
   REVIEW_OUTPUT_DIR      Default: <RESULTS_ROOT>/mlst_review_standalone
   POST_REVIEW_MAP_OUTPUT Default: <RESULTS_ROOT>/AGRF_samplesheet_with_results_post_review.tsv
   ST131_TYPER_DIR        Optional directory containing ST131Typer.sh
+  ST131_TYPER_INPUT_DIR  Optional existing assemblies directory to use instead
+                         of collecting a fresh flattened assemblies folder
   ST131_TYPER_OUTPUT_DIR Default: <RESULTS_ROOT>/<basename(RESULTS_ROOT)>_st131typer
   RESULTS_WORKBOOK_OUTPUT Default: <RESULTS_ROOT>/<basename(RESULTS_ROOT)>_results.xlsx
   LOG_DIR                Default: dirname(LOG_FILE) or <RESULTS_ROOT>
@@ -162,7 +175,9 @@ run_consolidate=${RUN_CONSOLIDATE:-1}
 map_agrf_results=${MAP_AGRF_RESULTS:-1}
 run_mlst_review=${RUN_MLST_REVIEW:-1}
 run_post_review_map=${RUN_POST_REVIEW_MAP:-0}
+run_collect_assemblies=${RUN_COLLECT_ASSEMBLIES:-1}
 run_st131typer=${RUN_ST131_TYPER:-0}
+st131_append_after_workbook=${ST131_APPEND_AFTER_WORKBOOK:-0}
 use_existing_st131typer=${USE_EXISTING_ST131_TYPER:-0}
 run_export_results_workbook=${RUN_EXPORT_RESULTS_WORKBOOK:-1}
 map_output=${MAP_OUTPUT:-$results_root_arg/AGRF_samplesheet_with_results.tsv}
@@ -186,6 +201,7 @@ consolidate_r_script=${CONSOLIDATE_SCRIPT:-$script_dir/consolidate_bactopia_batc
 map_pbs_script=${MAP_PBS_SCRIPT:-$script_dir/run_map_agrf_samplesheet_results.pbs}
 map_r_script=${MAP_R_SCRIPT:-$script_dir/map_agrf_samplesheet_results.R}
 review_mlst_pbs_script=${REVIEW_MLST_PBS_SCRIPT:-$script_dir/run_review_mlst_from_tsv.pbs}
+fetch_assemblies_pbs_script=${FETCH_ASSEMBLIES_PBS_SCRIPT:-$script_dir/run_fetch_batch_assemblies.pbs}
 st131typer_pbs_script=${ST131_TYPER_PBS_SCRIPT:-$script_dir/run_st131typer_from_assemblies.pbs}
 st131typer_dir=${ST131_TYPER_DIR:-}
 if [[ -n $st131typer_dir ]]; then
@@ -194,6 +210,7 @@ else
   st131typer_script=${ST131_TYPER_SCRIPT:-$run_agar_dir/ST131Typer.sh}
 fi
 st131typer_input_dir=${ST131_TYPER_INPUT_DIR:-}
+assemblies_outdir=${ASSEMBLIES_OUTDIR:-$results_root_arg/$(basename "$results_root_arg")_assemblies}
 st131typer_output_dir=${ST131_TYPER_OUTPUT_DIR:-$results_root_arg/$(basename "$results_root_arg")_st131typer}
 export_results_workbook_pbs_script=${EXPORT_RESULTS_WORKBOOK_PBS_SCRIPT:-$script_dir/run_export_bactopia_results_workbook.pbs}
 export_results_workbook_python_bin=${EXPORT_RESULTS_WORKBOOK_PYTHON_BIN:-python3}
@@ -565,13 +582,41 @@ if [[ $run_export_results_workbook == 1 ]]; then
   done
 fi
 
+if [[ $run_collect_assemblies != 0 && $run_collect_assemblies != 1 ]]; then
+  fail "RUN_COLLECT_ASSEMBLIES must be 0 or 1: $run_collect_assemblies"
+fi
+
+if [[ $st131_append_after_workbook != 0 && $st131_append_after_workbook != 1 ]]; then
+  fail "ST131_APPEND_AFTER_WORKBOOK must be 0 or 1: $st131_append_after_workbook"
+fi
+
+if [[ $st131_append_after_workbook == 1 && $run_export_results_workbook != 1 ]]; then
+  fail "ST131_APPEND_AFTER_WORKBOOK=1 requires RUN_EXPORT_RESULTS_WORKBOOK=1."
+fi
+
+if [[ $st131_append_after_workbook == 1 && $run_st131typer != 1 ]]; then
+  fail "ST131_APPEND_AFTER_WORKBOOK=1 requires RUN_ST131_TYPER=1."
+fi
+
+if [[ $st131_append_after_workbook == 1 && $use_existing_st131typer == 1 ]]; then
+  fail "ST131_APPEND_AFTER_WORKBOOK=1 cannot be combined with USE_EXISTING_ST131_TYPER=1."
+fi
+
 if [[ $run_st131typer == 1 ]]; then
-  for path in "$st131typer_pbs_script" "$st131typer_script"; do
-    if [[ ! -f $path ]]; then
-      fail "Required ST131Typer script not found: $path. Define ST131_TYPER_DIR=/path/to/ST131Typer or ST131_TYPER_SCRIPT=/path/to/ST131Typer.sh"
-    fi
-  done
+  if [[ ! -f $fetch_assemblies_pbs_script ]]; then
+    fail "Required assemblies collection script not found: $fetch_assemblies_pbs_script"
+  fi
+  if [[ ! -f $st131typer_pbs_script ]]; then
+    fail "Required ST131Typer PBS wrapper not found: $st131typer_pbs_script"
+  fi
+  if [[ ! -f $st131typer_script ]]; then
+    fail "Required ST131Typer script not found: $st131typer_script. Define ST131_TYPER_DIR=/path/to/ST131Typer or ST131_TYPER_SCRIPT=/path/to/ST131Typer.sh"
+  fi
   log "INFO" "Found ST131Typer.sh at: $st131typer_script"
+elif [[ $run_collect_assemblies == 1 ]]; then
+  if [[ ! -f $fetch_assemblies_pbs_script ]]; then
+    fail "Required assemblies collection script not found: $fetch_assemblies_pbs_script"
+  fi
 fi
 
 if [[ $use_existing_st131typer == 1 && $run_st131typer != 1 ]]; then
@@ -665,10 +710,12 @@ export BATCH_PREFIX="$batch_prefix"
 export PBS_LOG_DIR=${PBS_LOG_DIR:-}
 export PBS_MAIL_OPTIONS=${PBS_MAIL_OPTIONS:-}
 export PBS_MAIL_USER=${PBS_MAIL_USER:-}
-export RUN_ST131_TYPER=$run_st131typer
+export RUN_COLLECT_ASSEMBLIES=0
+export RUN_ST131_TYPER=0
 export ST131_TYPER_PBS_SCRIPT="$st131typer_pbs_script"
 export ST131_TYPER_SCRIPT="$st131typer_script"
 export ST131_TYPER_DIR=${st131typer_dir:-}
+export ASSEMBLIES_OUTDIR="$assemblies_outdir"
 export ST131_TYPER_OUTPUT_DIR="$st131typer_output_dir"
 if [[ -n $st131typer_input_dir ]]; then
   export ST131_TYPER_INPUT_DIR="$st131typer_input_dir"
@@ -677,6 +724,9 @@ fi
 consolidated_outdir=${CONSOLIDATED_OUTDIR:-${RESULTS_ROOT}/${BATCH_PREFIX}_consolidated}
 consolidate_job_id=
 st131typer_job_id=
+assemblies_job_id=
+workbook_job_id=
+st131_append_workbook_job_id=
 
 if [[ $postprocess_only == 1 ]]; then
   if [[ $run_consolidate == 1 ]]; then
@@ -706,10 +756,6 @@ else
   consolidate_job_id=$(
     printf '%s\n' "$submit_output" |
       awk '/^consolidation job / {gsub(":", "", $3); print $3}'
-  )
-  st131typer_job_id=$(
-    printf '%s\n' "$submit_output" |
-      awk '/^st131typer job / {gsub(":", "", $3); print $3}'
   )
 fi
 
@@ -782,18 +828,50 @@ elif [[ $run_post_review_map == 1 ]]; then
   final_dependency_job=$post_review_map_job_id
 fi
 
+if [[ $run_collect_assemblies == 1 && $st131_append_after_workbook != 1 ]]; then
+  current_step="submitting flattened assemblies collection job"
+  assemblies_job_id=$(scheduler_submit \
+    "fetch_assemblies_job" \
+    "$final_dependency_job" \
+    "INPUT_PATH=${RESULTS_ROOT},OUTPUT_DIR=${assemblies_outdir}" \
+    "$fetch_assemblies_pbs_script" \
+    "${PBS_LOG_DIR:-}" \
+    "${PBS_MAIL_OPTIONS:-}" \
+    "${PBS_MAIL_USER:-}")
+  log "INFO" "Assemblies job ${assemblies_job_id}: ${assemblies_outdir}"
+fi
+
+if [[ $run_st131typer == 1 && $st131_append_after_workbook != 1 ]]; then
+  current_step="submitting ST131Typer job"
+  st131_input_dir=${st131typer_input_dir:-$assemblies_outdir}
+  if [[ -z $assemblies_job_id && -z $st131typer_input_dir ]]; then
+    fail "RUN_ST131_TYPER=1 requires RUN_COLLECT_ASSEMBLIES=1 or ST131_TYPER_INPUT_DIR=/path/to/existing_assemblies"
+  fi
+
+  st131_dependency_job=${assemblies_job_id:-$final_dependency_job}
+  st131typer_job_id=$(scheduler_submit \
+    "st131typer_job" \
+    "$st131_dependency_job" \
+    "ASSEMBLIES_DIR=${st131_input_dir},RESULTS_ROOT=${RESULTS_ROOT},ST131_TYPER_SCRIPT=${st131typer_script},ST131_TYPER_OUTPUT_DIR=${st131typer_output_dir}" \
+    "$st131typer_pbs_script" \
+    "${PBS_LOG_DIR:-}" \
+    "${PBS_MAIL_OPTIONS:-}" \
+    "${PBS_MAIL_USER:-}")
+  log "INFO" "ST131Typer job ${st131typer_job_id}: ${st131typer_output_dir}"
+fi
+
 if [[ $run_export_results_workbook == 1 ]]; then
   current_step="submitting results workbook export job"
   workbook_dependency_job=$final_dependency_job
   workbook_st131_env=
-  if [[ -n $st131typer_job_id ]]; then
+  if [[ -n $st131typer_job_id && $st131_append_after_workbook != 1 ]]; then
     if [[ -n $workbook_dependency_job ]]; then
       workbook_dependency_job="${workbook_dependency_job}:${st131typer_job_id}"
     else
       workbook_dependency_job=$st131typer_job_id
     fi
   fi
-  if [[ $run_st131typer == 1 || $use_existing_st131typer == 1 ]]; then
+  if [[ $st131_append_after_workbook != 1 && ( $run_st131typer == 1 || $use_existing_st131typer == 1 ) ]]; then
     workbook_st131_env=",ST131_TYPER_DIR=${st131typer_output_dir}"
   fi
   workbook_job_id=$(scheduler_submit \
@@ -805,6 +883,49 @@ if [[ $run_export_results_workbook == 1 ]]; then
     "${PBS_MAIL_OPTIONS:-}" \
     "${PBS_MAIL_USER:-}")
   log "INFO" "Results workbook job ${workbook_job_id}: ${results_workbook_output}"
+fi
+
+if [[ $st131_append_after_workbook == 1 ]]; then
+  st131_input_dir=${st131typer_input_dir:-$assemblies_outdir}
+
+  if [[ $run_collect_assemblies == 1 ]]; then
+    current_step="submitting delayed flattened assemblies collection job"
+    assemblies_dependency_job=${workbook_job_id:-$final_dependency_job}
+    assemblies_job_id=$(scheduler_submit \
+      "fetch_assemblies_job" \
+      "$assemblies_dependency_job" \
+      "INPUT_PATH=${RESULTS_ROOT},OUTPUT_DIR=${assemblies_outdir}" \
+      "$fetch_assemblies_pbs_script" \
+      "${PBS_LOG_DIR:-}" \
+      "${PBS_MAIL_OPTIONS:-}" \
+      "${PBS_MAIL_USER:-}")
+    log "INFO" "Delayed assemblies job ${assemblies_job_id}: ${assemblies_outdir}"
+  elif [[ -z $st131typer_input_dir ]]; then
+    fail "ST131_APPEND_AFTER_WORKBOOK=1 requires RUN_COLLECT_ASSEMBLIES=1 or ST131_TYPER_INPUT_DIR=/path/to/existing_assemblies"
+  fi
+
+  current_step="submitting delayed ST131Typer job"
+  st131_dependency_job=${assemblies_job_id:-${workbook_job_id:-$final_dependency_job}}
+  st131typer_job_id=$(scheduler_submit \
+    "st131typer_job" \
+    "$st131_dependency_job" \
+    "ASSEMBLIES_DIR=${st131_input_dir},RESULTS_ROOT=${RESULTS_ROOT},ST131_TYPER_SCRIPT=${st131typer_script},ST131_TYPER_OUTPUT_DIR=${st131typer_output_dir}" \
+    "$st131typer_pbs_script" \
+    "${PBS_LOG_DIR:-}" \
+    "${PBS_MAIL_OPTIONS:-}" \
+    "${PBS_MAIL_USER:-}")
+  log "INFO" "Delayed ST131Typer job ${st131typer_job_id}: ${st131typer_output_dir}"
+
+  current_step="submitting ST131 workbook append job"
+  st131_append_workbook_job_id=$(scheduler_submit \
+    "results_xlsx_st131_append_job" \
+    "$st131typer_job_id" \
+    "WORKBOOK_OUTPUT=${results_workbook_output},EXPORT_SCRIPT=${export_results_workbook_script},PYTHON_BIN=${export_results_workbook_python_bin},ST131_TYPER_DIR=${st131typer_output_dir},EXPORT_APPEND=1" \
+    "$export_results_workbook_pbs_script" \
+    "${PBS_LOG_DIR:-}" \
+    "${PBS_MAIL_OPTIONS:-}" \
+    "${PBS_MAIL_USER:-}")
+  log "INFO" "ST131 workbook append job ${st131_append_workbook_job_id}: ${results_workbook_output}"
 fi
 
 log "INFO" "Pipeline submission completed successfully."

@@ -782,6 +782,11 @@ You must set `RDS_SFTP_USER` explicitly for uploads. The packaged helper keeps
 the RDS host default, but it does not hardcode any personal username or
 password.
 
+On the shared Gadi install, the PBS wrapper will also try the packaged helper
+under `/g/data/<project>/agar-bactopia-pipeline/scripts/transfer_gadi_to_rds.sh`
+before it errors. Explicitly exporting `TRANSFER_SCRIPT` is still the safest
+portable option when you are not using that shared layout.
+
 The packaged wrapper now defaults these paths onto scratch when you do not
 override them:
 

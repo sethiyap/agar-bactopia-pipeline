@@ -46,13 +46,41 @@ RDS_COPY_SINCE=${RDS_COPY_SINCE:-}
 TRANSFER_SCRIPT=${TRANSFER_SCRIPT:-}
 
 if [[ -z $TRANSFER_SCRIPT ]]; then
-  spool_candidate="$script_dir/transfer_gadi_to_rds.sh"
-  if [[ -x $spool_candidate ]]; then
-    TRANSFER_SCRIPT=$spool_candidate
-  else
-    echo "TRANSFER_SCRIPT is not set, and the default sibling helper was not found." >&2
+  transfer_candidates=(
+    "$script_dir/transfer_gadi_to_rds.sh"
+  )
+  if [[ -n ${PBS_O_WORKDIR:-} ]]; then
+    transfer_candidates+=(
+      "$PBS_O_WORKDIR/scripts/transfer_gadi_to_rds.sh"
+      "$PBS_O_WORKDIR/transfer_gadi_to_rds.sh"
+    )
+  fi
+  transfer_candidates+=(
+    "/g/data/${project_name}/agar-bactopia-pipeline/scripts/transfer_gadi_to_rds.sh"
+  )
+  if [[ $project_name != "rg42" ]]; then
+    transfer_candidates+=(
+      "/g/data/rg42/agar-bactopia-pipeline/scripts/transfer_gadi_to_rds.sh"
+    )
+  fi
+
+  for candidate in "${transfer_candidates[@]}"; do
+    if [[ -x $candidate ]]; then
+      TRANSFER_SCRIPT=$candidate
+      break
+    fi
+  done
+
+  if [[ -z $TRANSFER_SCRIPT ]]; then
+    echo "TRANSFER_SCRIPT is not set, and no default helper path was found." >&2
     echo "PBS is running this wrapper from its internal spool directory:" >&2
     echo "  $script_dir" >&2
+    if [[ -n ${PBS_O_WORKDIR:-} ]]; then
+      echo "PBS_O_WORKDIR was:" >&2
+      echo "  $PBS_O_WORKDIR" >&2
+    fi
+    echo "Tried these helper paths:" >&2
+    printf '  %s\n' "${transfer_candidates[@]}" >&2
     echo "Set TRANSFER_SCRIPT explicitly before qsub, for example:" >&2
     echo "  export TRANSFER_SCRIPT=/g/data/rg42/agar-bactopia-pipeline/scripts/transfer_gadi_to_rds.sh" >&2
     exit 1

@@ -161,58 +161,6 @@ Notes:
 - if you are restoring previous results or intermediates from RDS, point
   `GADI_DEST` at the matching location under `/scratch/rg42/AGAR/intermediates/...`
 
-## Copy Finished Results Back To RDS
-
-After the pipeline finishes on Gadi, use the packaged Gadi-to-RDS upload helper:
-
-- `scripts/transfer_gadi_to_rds.sh`: the transfer helper
-- `scripts/jobsubmission_transfer_gadi_to_rds.pbs`: the PBS wrapper to submit on Gadi
-
-The recommended submission pattern is shell `export ...` followed by `qsub -V`.
-This avoids the PBS environment-size problems that can happen with `qsub -v`,
-especially when `RDS_INCLUDE_DIRS` contains multiple comma-separated paths.
-
-You must set `RDS_SFTP_USER` explicitly for uploads. The packaged helper keeps
-the RDS host default, but it does not hardcode any personal username or
-password.
-
-The packaged wrapper now defaults these paths onto scratch when you do not
-override them:
-
-- `DEBUG_LOG_DIR=/scratch/rg42/${USER}/transfer_logs`
-- `RDS_UPLOAD_MANIFEST_DIR=/scratch/rg42/${USER}/.rds_transfer_manifests`
-
-The packaged wrapper also skips these by default unless you override the
-settings:
-
-- `RDS_EXCLUDE_DIRS=_work`
-- `RDS_EXCLUDE_FILES=.nextflow.log,.nextflow.log.*`
-
-By default, the detailed `transfer_gadi_to_rds.*.run.log` is deleted after a
-successful transfer so scratch does not fill with stale debug traces. If you
-want to keep that helper log for a successful run, set `KEEP_DEBUG_LOG=1`
-before `qsub`.
-
-For authentication, `sftp` will usually prompt for your RDS password unless
-your Gadi session already has working SSH key or agent-based authentication for
-that RDS endpoint.
-
-### Useful Transfer Controls
-
-- `RDS_IGNORE_MANIFEST=1` forces a requeue when files were already recorded in
-  the upload manifest but need to be uploaded again.
-- `RDS_PRIORITIZE_UPLOADS=0` skips the extra ranking step and can help on very
-  large trees with many small files.
-- `RDS_INCLUDE_DIRS` is source-relative and prefix-based. It works for exact
-  file paths too, but not shell globs like `*_bracken_only`.
-- `RDS_EXCLUDE_DIRS` defaults to `_work`, so noisy workflow scratch directories
-  are skipped by default.
-- `RDS_EXCLUDE_FILES` defaults to `.nextflow.log,.nextflow.log.*`, so those
-  Nextflow log files are skipped by default.
-- `RDS_EXCLUDE_PATHS` is available when you want to exclude specific
-  source-relative paths rather than whole directory prefixes or basename
-  patterns.
-
 ## Metadata Sheet Requirements
 
 The submit wrapper expects exactly one metadata sheet matching
@@ -818,6 +766,58 @@ Review columns:
 
 If a reviewed table is available, the standalone MLST values are written back
 into `mlst_scheme`, `mlst_st`, and `mlst_profile` in the reviewed TSV.
+
+## Copy Finished Results Back To RDS
+
+After the pipeline finishes on Gadi, use the packaged Gadi-to-RDS upload helper:
+
+- `scripts/transfer_gadi_to_rds.sh`: the transfer helper
+- `scripts/jobsubmission_transfer_gadi_to_rds.pbs`: the PBS wrapper to submit on Gadi
+
+The recommended submission pattern is shell `export ...` followed by `qsub -V`.
+This avoids the PBS environment-size problems that can happen with `qsub -v`,
+especially when `RDS_INCLUDE_DIRS` contains multiple comma-separated paths.
+
+You must set `RDS_SFTP_USER` explicitly for uploads. The packaged helper keeps
+the RDS host default, but it does not hardcode any personal username or
+password.
+
+The packaged wrapper now defaults these paths onto scratch when you do not
+override them:
+
+- `DEBUG_LOG_DIR=/scratch/rg42/${USER}/transfer_logs`
+- `RDS_UPLOAD_MANIFEST_DIR=/scratch/rg42/${USER}/.rds_transfer_manifests`
+
+The packaged wrapper also skips these by default unless you override the
+settings:
+
+- `RDS_EXCLUDE_DIRS=_work`
+- `RDS_EXCLUDE_FILES=.nextflow.log,.nextflow.log.*`
+
+By default, the detailed `transfer_gadi_to_rds.*.run.log` is deleted after a
+successful transfer so scratch does not fill with stale debug traces. If you
+want to keep that helper log for a successful run, set `KEEP_DEBUG_LOG=1`
+before `qsub`.
+
+For authentication, `sftp` will usually prompt for your RDS password unless
+your Gadi session already has working SSH key or agent-based authentication for
+that RDS endpoint.
+
+### Useful Transfer Controls
+
+- `RDS_IGNORE_MANIFEST=1` forces a requeue when files were already recorded in
+  the upload manifest but need to be uploaded again.
+- `RDS_PRIORITIZE_UPLOADS=0` skips the extra ranking step and can help on very
+  large trees with many small files.
+- `RDS_INCLUDE_DIRS` is source-relative and prefix-based. It works for exact
+  file paths too, but not shell globs like `*_bracken_only`.
+- `RDS_EXCLUDE_DIRS` defaults to `_work`, so noisy workflow scratch directories
+  are skipped by default.
+- `RDS_EXCLUDE_FILES` defaults to `.nextflow.log,.nextflow.log.*`, so those
+  Nextflow log files are skipped by default.
+- `RDS_EXCLUDE_PATHS` is available when you want to exclude specific
+  source-relative paths rather than whole directory prefixes or basename
+  patterns.
 
 ### Copy A Finished Batch Results Root
 

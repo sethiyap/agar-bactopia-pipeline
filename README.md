@@ -135,8 +135,10 @@ Important behaviour:
 - for non-AGAR projects, sample names are used as they are
 - for AGAR projects, the launcher can normalize AGAR-style FASTQ names before FOFN creation
 - if `samplesheet.fofn` already exists in `METADATA_DIR`, the launcher reuses it
-- mapped output files reuse the metadata sheet prefix, so `B07_samplesheet.txt`
-  produces outputs such as `B07_samplesheet_with_results.tsv`
+- mapped output files reuse the metadata sheet prefix
+- the prefix comes from the metadata filename before `_samplesheet.txt`
+- for example, `B07_samplesheet.txt` gives the prefix `B07` and produces
+  outputs such as `B07_samplesheet_with_results.tsv`
 
 If you have changed the raw FASTQ folder and want the batch list rebuilt,
 delete or move aside the old `samplesheet.fofn` first.

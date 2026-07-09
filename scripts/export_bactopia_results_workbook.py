@@ -69,18 +69,39 @@ def collect_tables(dir_path: Path, prefix: str | None = None) -> list[tuple[str,
     return tables
 
 
+def choose_unique_results_file(results_root: Path, pattern: str) -> Path | None:
+    matches = sorted(path for path in results_root.glob(pattern) if path.is_file())
+    if not matches:
+        return None
+    if len(matches) > 1:
+        joined = "\n".join(f"  {path}" for path in matches)
+        raise SystemExit(
+            f"Multiple results files matched {pattern} under {results_root}:\n{joined}\n"
+            "Pass a single results set into the workbook export."
+        )
+    return matches[0]
+
+
 def choose_mapped_results(results_root: Path) -> Path:
-    preferred = results_root / "AGRF_samplesheet_with_results_mlst_reviewed.tsv"
-    fallback = results_root / "AGRF_samplesheet_with_results.tsv"
-    if preferred.exists():
+    preferred = choose_unique_results_file(results_root, "*_samplesheet_with_results_mlst_reviewed.tsv")
+    fallback = choose_unique_results_file(results_root, "*_samplesheet_with_results.tsv")
+    if preferred is not None:
         return preferred
-    if fallback.exists():
+    if fallback is not None:
         return fallback
     raise SystemExit(
-        "Neither reviewed nor mapped AGRF results were found. Expected one of:\n"
-        f"  {preferred}\n"
-        f"  {fallback}\n"
+        "Neither reviewed nor mapped metadata results were found. Expected one of:\n"
+        f"  {results_root}/*_samplesheet_with_results_mlst_reviewed.tsv\n"
+        f"  {results_root}/*_samplesheet_with_results.tsv\n"
     )
+
+
+def mapped_sheet_name(mapped_path: Path) -> str:
+    stem = mapped_path.stem
+    for suffix in ("_with_results_mlst_reviewed", "_with_results"):
+        if stem.endswith(suffix):
+            return f"{stem[:-len(suffix)]}_mapped"
+    return stem
 
 
 def find_st131typer_summary(dir_path: Path) -> Path | None:
@@ -143,7 +164,7 @@ def main() -> int:
 
     if results_root is not None and consolidated_dir is not None:
         mapped_path = choose_mapped_results(results_root)
-        add_sheet(workbook, used_names, "AGRF_samplesheet_mapped", read_table(mapped_path))
+        add_sheet(workbook, used_names, mapped_sheet_name(mapped_path), read_table(mapped_path))
 
         for top_level in ("project_summary.tsv", "tool_processing_log.tsv"):
             path = consolidated_dir / top_level

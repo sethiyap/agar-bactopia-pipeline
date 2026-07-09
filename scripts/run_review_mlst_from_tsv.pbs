@@ -11,18 +11,18 @@
 
 set -euo pipefail
 
-# Run standalone MLST only for samples flagged in the AGRF review-required TSV.
+# Run standalone MLST only for samples flagged in the metadata review-required TSV.
 #
 # Example:
 #   qsub scripts/run_review_mlst_from_tsv.pbs
 #
 # Optional override:
-#   qsub -v "REVIEW_TSV=/scratch/rg42/AGAR/intermediates/2025/B05/AGRF_samplesheet_with_results_review_required.tsv,RESULTS_ROOT=/scratch/rg42/AGAR/intermediates/2025/B05" \
+#   qsub -v "REVIEW_TSV=/scratch/rg42/AGAR/intermediates/2025/B05/B05_samplesheet_with_results_review_required.tsv,RESULTS_ROOT=/scratch/rg42/AGAR/intermediates/2025/B05" \
 #     scripts/run_review_mlst_from_tsv.pbs
 #
 # Optional qsub variables:
 #   BATCH_PREFIX     Default: batch_bactopia
-#   MAPPED_TSV       Default: <RESULTS_ROOT>/AGRF_samplesheet_with_results.tsv
+#   MAPPED_TSV       Default: first <RESULTS_ROOT>/*_samplesheet_with_results.tsv match
 #   OUTPUT_DIR       Default: <RESULTS_ROOT>/mlst_review_standalone
 #   MINIFORGE_ROOT   Default: /g/data/<PROJECT>/bactopia_datasets/miniforge3
 #   MLST_ENV         Default: /g/data/<PROJECT>/bactopia_datasets/envs/mlst_env
@@ -30,8 +30,6 @@ set -euo pipefail
 
 RESULTS_ROOT=${RESULTS_ROOT:-${PBS_O_WORKDIR:-$PWD}}
 BATCH_PREFIX=${BATCH_PREFIX:-batch_bactopia}
-REVIEW_TSV=${REVIEW_TSV:-${RESULTS_ROOT}/AGRF_samplesheet_with_results_review_required.tsv}
-MAPPED_TSV=${MAPPED_TSV:-${RESULTS_ROOT}/AGRF_samplesheet_with_results.tsv}
 OUTPUT_DIR=${OUTPUT_DIR:-${RESULTS_ROOT}/mlst_review_standalone}
 default_project=${PROJECT:-}
 if [[ -z $default_project && $RESULTS_ROOT =~ ^/scratch/([^/]+)/ ]]; then
@@ -46,6 +44,49 @@ RUN_AGAR_ROOT=${RUN_AGAR_ROOT:-${PBS_O_WORKDIR:-$PWD}}
 
 SCRIPT_DIR="${RUN_AGAR_ROOT}/scripts"
 HELPER_SCRIPT="${SCRIPT_DIR}/run_review_mlst_from_tsv.sh"
+
+find_unique_results_file() {
+  local dir="$1"
+  local pattern="$2"
+  local matches=()
+  local candidate=""
+
+  shopt -s nullglob
+  for candidate in "$dir"/$pattern; do
+    [[ -f $candidate ]] || continue
+    matches+=("$candidate")
+  done
+  shopt -u nullglob
+
+  if [[ ${#matches[@]} -eq 1 ]]; then
+    printf '%s\n' "${matches[0]}"
+    return 0
+  fi
+
+  if [[ ${#matches[@]} -gt 1 ]]; then
+    echo "Multiple matches found in $dir for pattern $pattern: ${matches[*]}" >&2
+    exit 1
+  fi
+
+  return 1
+}
+
+REVIEW_TSV=${REVIEW_TSV:-}
+MAPPED_TSV=${MAPPED_TSV:-}
+
+if [[ -z "$REVIEW_TSV" ]]; then
+  REVIEW_TSV=$(find_unique_results_file "$RESULTS_ROOT" '*_samplesheet_with_results_review_required.tsv') || {
+    echo "REVIEW_TSV was not provided and no *_samplesheet_with_results_review_required.tsv file was found in: $RESULTS_ROOT" >&2
+    exit 1
+  }
+fi
+
+if [[ -z "$MAPPED_TSV" ]]; then
+  MAPPED_TSV=$(find_unique_results_file "$RESULTS_ROOT" '*_samplesheet_with_results.tsv') || {
+    echo "MAPPED_TSV was not provided and no *_samplesheet_with_results.tsv file was found in: $RESULTS_ROOT" >&2
+    exit 1
+  }
+fi
 
 if [[ ! -f "$REVIEW_TSV" ]]; then
   echo "REVIEW_TSV not found: $REVIEW_TSV" >&2

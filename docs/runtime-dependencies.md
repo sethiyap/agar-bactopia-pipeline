@@ -64,12 +64,15 @@ such as `MINIFORGE_ROOT`, `MLST_ENV`, `ST131_TYPER_DIR`, and
 The packaged workflow includes a phenotype-guided MLST review stage.
 
 - `map_agrf_samplesheet_results.R` writes the main AGRF-mapped results table and
-  a review-only subset called `AGRF_samplesheet_with_results_review_required.tsv`
+  a review-only subset called
+  `<prefix>_samplesheet_with_results_review_required.tsv`
 - a sample is flagged for review when the canonicalized AGRF phenotype in
   `Comments` disagrees with the canonicalized genus implied by the MLST scheme,
   or when MLST carries an ambiguity that requires follow-up
 - `run_review_mlst_from_tsv.sh` reruns standalone `mlst` only for those flagged
   isolates
+
+Here, `<prefix>` is taken from the metadata filename before `_samplesheet.txt`.
 
 Resolution behavior:
 
@@ -84,8 +87,8 @@ Resolution behavior:
 Reviewed outputs include:
 
 - `mlst_review.tsv`
-- `AGRF_samplesheet_with_results_mlst_reviewed.tsv`
-- optional `AGRF_samplesheet_with_results_post_review.tsv`
+- `<prefix>_samplesheet_with_results_mlst_reviewed.tsv`
+- optional `<prefix>_samplesheet_with_results_post_review.tsv`
 
 ## Backend Assumptions
 

@@ -142,14 +142,11 @@ prioritize_pending_files() {
     [[ -f $local_match ]] || continue
 
     priority=2
-    case "$rel_path" in
-      AGRF_samplesheet_with_results.tsv)
-        priority=0
-        ;;
-      *_consolidated/*)
-        priority=1
-        ;;
-    esac
+    if [[ $rel_path != */* && $rel_path == *_samplesheet_with_results.tsv ]]; then
+      priority=0
+    elif [[ $rel_path == *_consolidated/* ]]; then
+      priority=1
+    fi
 
     mtime=$(find "$local_match" -prune -printf '%T@\n')
     printf '%s\t%s\t%s\n' "$priority" "$mtime" "$rel_path" >> "$ranked_file"
@@ -453,8 +450,9 @@ if [[ ! -s $missing_files ]]; then
   exit 0
 fi
 
-if grep -qx 'AGRF_samplesheet_with_results.tsv' "$missing_files"; then
-  log "Priority upload queued: AGRF_samplesheet_with_results.tsv"
+priority_results_file=$(grep -E -m1 '^[^/]+_samplesheet_with_results\.tsv$' "$missing_files" || true)
+if [[ -n $priority_results_file ]]; then
+  log "Priority upload queued: $priority_results_file"
 fi
 if grep -q '^[^/]*_consolidated/' "$missing_files"; then
   matched_consolidated_dir=$(grep -m1 '^[^/]*_consolidated/' "$missing_files" | cut -d/ -f1)

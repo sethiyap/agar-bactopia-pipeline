@@ -135,6 +135,8 @@ Important behaviour:
 - for non-AGAR projects, sample names are used as they are
 - for AGAR projects, the launcher can normalize AGAR-style FASTQ names before FOFN creation
 - if `samplesheet.fofn` already exists in `METADATA_DIR`, the launcher reuses it
+- mapped output files reuse the metadata sheet prefix, so `B07_samplesheet.txt`
+  produces outputs such as `B07_samplesheet_with_results.tsv`
 
 If you have changed the raw FASTQ folder and want the batch list rebuilt,
 delete or move aside the old `samplesheet.fofn` first.
@@ -255,12 +257,15 @@ Copy only the main deliverables first:
 export SRC_PATH=/scratch/rg42/AGAR/intermediates/2025/B07
 export RDS_DEST=/rds/PRJ-AGAR/PRJ-AGAR/intermediates/2025/B07
 export RDS_SFTP_USER=<your_rds_username>
-export RDS_INCLUDE_DIRS='AGRF_samplesheet_with_results.tsv,batch_bactopia_consolidated'
+export RDS_INCLUDE_DIRS='<prefix>_samplesheet_with_results.tsv,batch_bactopia_consolidated'
 export DEBUG_LOG_DIR=/scratch/rg42/${USER}/transfer_logs
 export RDS_UPLOAD_MANIFEST_DIR=/scratch/rg42/${USER}/.rds_transfer_manifests
 mkdir -p "$DEBUG_LOG_DIR" "$RDS_UPLOAD_MANIFEST_DIR"
 qsub -V /g/data/rg42/agar-bactopia-pipeline/scripts/jobsubmission_transfer_gadi_to_rds.pbs
 ```
+
+Here, `<prefix>` means the part before `_samplesheet.txt` in your metadata
+filename.
 
 Transfer notes:
 
@@ -431,9 +436,9 @@ The most useful outputs for most users are:
 
 - `batch_bactopia_001`, `batch_bactopia_002`, and so on: per-batch run folders
 - `batch_bactopia_consolidated`: merged summary outputs across batches
-- `AGRF_samplesheet_with_results.tsv`: metadata plus mapped tool results
-- `AGRF_samplesheet_with_results_review_required.tsv`: rows flagged for MLST follow-up
-- `AGRF_samplesheet_with_results_mlst_reviewed.tsv`: preferred final reviewed TSV when present
+- `<prefix>_samplesheet_with_results.tsv`: metadata plus mapped tool results
+- `<prefix>_samplesheet_with_results_review_required.tsv`: rows flagged for MLST follow-up
+- `<prefix>_samplesheet_with_results_mlst_reviewed.tsv`: preferred final reviewed TSV when present
 - final workbook under `RESULTS_ROOT`: exported Excel summary
 
 Common metadata and review columns:
@@ -442,9 +447,9 @@ Common metadata and review columns:
 - common mapped result fields: MLST, Kleborate, FimTyper, abritAMR, PlasmidFinder, Bracken
 - common review fields: `review_required`, `review_reason`, `mlst_review_note`
 
-If `AGRF_samplesheet_with_results_mlst_reviewed.tsv` exists, use that as the
-preferred reviewed table. If it does not exist, use
-`AGRF_samplesheet_with_results.tsv`.
+If `<prefix>_samplesheet_with_results_mlst_reviewed.tsv` exists, use that as
+the preferred reviewed table. If it does not exist, use
+`<prefix>_samplesheet_with_results.tsv`.
 
 ## Troubleshooting And Operational Notes
 

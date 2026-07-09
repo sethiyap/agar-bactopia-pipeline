@@ -6,10 +6,10 @@ usage() {
   cat <<'EOF'
 Usage:
   bash scripts/run_review_mlst_from_tsv.sh \
-    --review-tsv /path/to/AGRF_samplesheet_with_results_review_required.tsv \
+    --review-tsv /path/to/B05_samplesheet_with_results_review_required.tsv \
     --results-root /scratch/rg42/AGAR/intermediates/2025/B05 \
     [--batch-prefix batch_bactopia] \
-    [--mapped-tsv /path/to/AGRF_samplesheet_with_results.tsv] \
+    [--mapped-tsv /path/to/B05_samplesheet_with_results.tsv] \
     [--output-dir /scratch/rg42/AGAR/intermediates/2025/B05/mlst_review_standalone]
 
 Optional environment variables:
@@ -109,7 +109,7 @@ if [[ -z $MAPPED_TSV ]]; then
   MAPPED_TSV=$(mapped_output_from_review "$REVIEW_TSV")
 fi
 if [[ ! -f $MAPPED_TSV ]]; then
-  echo "Mapped AGRF TSV not found: $MAPPED_TSV" >&2
+  echo "Mapped results TSV not found: $MAPPED_TSV" >&2
   exit 1
 fi
 

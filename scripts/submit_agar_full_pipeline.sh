@@ -81,9 +81,9 @@ Environment variables:
                          scratch inode usage at or above this percent
   PROJECT_INODE_MAX_USE_PCT Default: 95. Fail early if lquota/nci_account reports
                          scratch inode usage at or above this percent
-  MAP_OUTPUT             Default: <RESULTS_ROOT>/AGRF_samplesheet_with_results.tsv
+  MAP_OUTPUT             Default: <RESULTS_ROOT>/<metadata-prefix>_samplesheet_with_results.tsv
   REVIEW_OUTPUT_DIR      Default: <RESULTS_ROOT>/mlst_review_standalone
-  POST_REVIEW_MAP_OUTPUT Default: <RESULTS_ROOT>/AGRF_samplesheet_with_results_post_review.tsv
+  POST_REVIEW_MAP_OUTPUT Default: <RESULTS_ROOT>/<metadata-prefix>_samplesheet_with_results_post_review.tsv
   ST131_TYPER_DIR        Optional directory containing ST131Typer.sh
   ST131_TYPER_INPUT_DIR  Optional existing assemblies directory to use instead
                          of collecting a fresh flattened assemblies folder
@@ -180,9 +180,9 @@ run_st131typer=${RUN_ST131_TYPER:-0}
 st131_append_after_workbook=${ST131_APPEND_AFTER_WORKBOOK:-0}
 use_existing_st131typer=${USE_EXISTING_ST131_TYPER:-0}
 run_export_results_workbook=${RUN_EXPORT_RESULTS_WORKBOOK:-1}
-map_output=${MAP_OUTPUT:-$results_root_arg/AGRF_samplesheet_with_results.tsv}
+map_output=${MAP_OUTPUT:-}
 review_output_dir=${REVIEW_OUTPUT_DIR:-$results_root_arg/mlst_review_standalone}
-post_review_map_output=${POST_REVIEW_MAP_OUTPUT:-$results_root_arg/AGRF_samplesheet_with_results_post_review.tsv}
+post_review_map_output=${POST_REVIEW_MAP_OUTPUT:-}
 results_workbook_output=${RESULTS_WORKBOOK_OUTPUT:-$results_root_arg/$(basename "$results_root_arg")_results.xlsx}
 log_dir=${LOG_DIR:-}
 if [[ -n ${LOG_FILE:-} ]]; then
@@ -298,6 +298,22 @@ find_metadata_sheet() {
   fi
 
   return 1
+}
+
+metadata_output_stem() {
+  local metadata_path=$1
+  local metadata_name prefix
+
+  metadata_name=$(basename "$metadata_path")
+  prefix=${metadata_name%_samplesheet.txt}
+  if [[ $prefix == "$metadata_name" ]]; then
+    prefix=${metadata_name%.*}
+  fi
+  if [[ -z $prefix || $prefix == "$metadata_name" ]]; then
+    prefix="metadata"
+  fi
+
+  printf '%s_samplesheet\n' "$prefix"
 }
 
 find_existing_parent() {
@@ -549,12 +565,21 @@ if [[ -z $agrf_sheet_path ]]; then
   fi
 fi
 
+metadata_output_prefix=$(metadata_output_stem "$agrf_sheet_path")
+if [[ -z $map_output ]]; then
+  map_output=$results_root_arg/${metadata_output_prefix}_with_results.tsv
+fi
+if [[ -z $post_review_map_output ]]; then
+  post_review_map_output=$results_root_arg/${metadata_output_prefix}_with_results_post_review.tsv
+fi
+
 log "INFO" "Pipeline log file: $log_file"
 log "INFO" "RAW_FASTQ_DIR=$raw_fastq_dir"
 log "INFO" "METADATA_DIR=$metadata_dir"
 log "INFO" "RESULTS_ROOT=$results_root_arg"
 log "INFO" "SAMPLESHEET_PATH=$samplesheet_path"
 log "INFO" "METADATA_SHEET_PATH=$agrf_sheet_path"
+log "INFO" "RESULTS_PREFIX=$metadata_output_prefix"
 
 if [[ ! -d $raw_fastq_dir ]]; then
   fail "RAW_FASTQ_DIR not found: $raw_fastq_dir"

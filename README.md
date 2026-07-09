@@ -1,77 +1,68 @@
 # agar-bactopia-pipeline
 
-AGAR-compatible Bactopia packaging with a single public entrypoint,
-site-specific submission wrappers, and compatibility fixes for cases where
-stock Bactopia output was not operationally consistent with AGAR review.
+`agar-bactopia-pipeline` is an AGAR-compatible packaging of Bactopia for HPC
+use. It wraps submission, batching, result consolidation, metadata mapping,
+MLST review, workbook export, and optional ST131Typer follow-up into one
+workflow.
 
-## Motivation
+This README is organised as a simple step-by-step guide first. Detailed
+reference sections come later.
 
-This package exists because stock `bactopia v3.2.1` was close to the AGAR
-workflow, but not reliably consistent enough for routine interpretation on
-Gadi.
+## Quick Index
 
-The main gap was not just software versioning. In practice, AGAR needed tighter
-control over MLST database provenance, because different bundled PubMLST
-snapshots could produce calls that disagreed with phenotype expectations and
-external cross-checks. That made database choice, review follow-up, and output
-traceability operational requirements rather than optional extras.
+1. [What This Pipeline Does](#what-this-pipeline-does)
+2. [Step-By-Step On Gadi](#step-by-step-on-gadi)
+3. [Common Variations](#common-variations)
+4. [Optional ST131Typer Workflow](#optional-st131typer-workflow)
+5. [Important Outputs](#important-outputs)
+6. [Troubleshooting And Operational Notes](#troubleshooting-and-operational-notes)
+7. [Shared Install And Other Systems](#shared-install-and-other-systems)
+8. [Slurm Usage](#slurm-usage)
+9. [Repository Layout](#repository-layout)
 
-The package also carries a few workflow-level compatibility fixes that AGAR
-needed in routine use:
+## What This Pipeline Does
 
-- patched MLST database handling and provenance tracking
-- review-driven MLST follow-up for flagged isolates
-- Kleborate compatibility shims for the expected working behavior
-- standalone FimTyper integration and merge-back into project summaries
-- stable launcher, site config, and AGAR-facing mapped outputs
+For a normal run, the pipeline:
 
-So `agar-bactopia-pipeline` is best understood as an AGAR-compatible
-distribution of Bactopia rather than a completely separate biological pipeline.
+1. reads FASTQ files from a raw-data folder
+2. creates or reuses `samplesheet.fofn`
+3. splits the run into manageable batches
+4. submits Bactopia jobs
+5. consolidates the batch outputs
+6. maps the results back to the metadata sheet
+7. runs MLST review for flagged samples
+8. exports a final workbook
 
-## Access On Gadi
+Compared with plain Bactopia, this repo also includes AGAR-facing workflow
+behaviour such as metadata mapping, MLST review logic, optional FimTyper
+integration, and optional ST131Typer append workflows.
 
-### Connecting To Gadi
+## Step-By-Step On Gadi
 
-Log in to Gadi with your NCI account, stay in your home directory for normal
-command launches, and access the shared pipeline plus AGAR working areas by
-path:
+Most users on Gadi only need the steps in this section.
+
+### 1. Log In To Gadi And Work From Your Home Directory
+
+Use your home directory as the place where you launch commands. This keeps the
+default PBS `.o` and `.e` files out of the shared `/g/data` install.
 
 ```bash
 ssh <nci_username>@gadi.nci.org.au
-
 cd /home/562/<nci_username>
-
-# inspect the shared pipeline install by path
-ls /g/data/rg42/agar-bactopia-pipeline
-
-# inspect AGAR raw data, metadata, and intermediate processing roots
-ls /scratch/rg42/AGAR
 ```
 
-Key Gadi paths used by this pipeline:
+Important paths used by the shared `rg42` install:
 
 - pipeline code: `/g/data/rg42/agar-bactopia-pipeline`
-- AGAR raw data root: `/scratch/rg42/AGAR/raw_data`
-- AGAR metadata root: `/scratch/rg42/AGAR/metadata`
-- AGAR intermediate processing root: `/scratch/rg42/AGAR/intermediates`
-- preferred launch directory for jobs: `/home/562/<nci_username>`
+- AGAR raw data: `/scratch/rg42/AGAR/raw_data`
+- AGAR metadata: `/scratch/rg42/AGAR/metadata`
+- AGAR intermediates and results: `/scratch/rg42/AGAR/intermediates`
 
-Typical Gadi workflow:
+### 2. Get Your Data Onto Gadi
 
-- log in to Gadi
-- launch packaged commands from `/home/562/<nci_username>` and call scripts by
-  their absolute `/g/data/rg42/agar-bactopia-pipeline/...` paths
-- optionally download a new AGRF delivery into `/scratch/rg42/AGAR/raw_data/...`
-- read batch inputs from `/scratch/rg42/AGAR/raw_data/...`
-- read metadata from `/scratch/rg42/AGAR/metadata/...`
-- write processing outputs under `/scratch/rg42/AGAR/intermediates/...`
+Use one of the two options below.
 
-### Downloading Data From AGRF
-
-Download AGRF raw data onto Gadi:
-
-The AGRF download helper defaults to `/scratch/rg42/AGAR/raw_data`, but that
-raw-data destination root is configurable with `DEST_ROOT`.
+#### Option A: Download A New AGRF Delivery
 
 ```bash
 cd /home/562/<nci_username>
@@ -82,44 +73,20 @@ cd /home/562/<nci_username>
   B07
 ```
 
-That command creates:
+This creates:
 
 ```bash
 /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5
 ```
 
-Notes:
+Useful notes:
 
-- `REMOTE_SPEC` must be an rsync-compatible source such as
-  `user@host:/path/to/delivery`
+- `REMOTE_SPEC` must be an rsync-compatible source such as `user@host:/path/to/delivery`
 - the default destination root is `/scratch/rg42/AGAR/raw_data`
-- if you want a different raw-data root, override `DEST_ROOT` with an absolute
-  path, for example:
-  `DEST_ROOT=/scratch/rg42/my_project/raw_data ./scripts/download_agrf_to_gadi.sh ...`
-- if the source needs a custom SSH port or options, set `RSYNC_RSH`, for
-  example `RSYNC_RSH="ssh -p 2222"`
-- set `DRY_RUN=1` first if you want to preview the transfer
-- the script is intended for raw-data delivery downloads only; metadata still
-  belongs under `/scratch/rg42/AGAR/metadata/...`
-- the metadata directory should contain a text file matching
-  `*_samplesheet.txt`
-- that metadata sheet should preferably contain the columns `Sample name` and
-  `Comments`
-- if those headers are missing, the mapper uses the first metadata column as
-  `Sample name` and the second as `Comments`
-- `Sample name`, or the first metadata column when those headers are missing,
-  must match the final sample ids used in the FOFN
-- `Comments`, or the second metadata column when those headers are missing,
-  should include the free-text phenotype or organism name used by the
-  downstream MLST review and mapping steps
+- use `DEST_ROOT=/absolute/path` if you need a different raw-data root
+- use `DRY_RUN=1` first if you want to preview the transfer
 
-### Downloading Data From RDS
-
-If the data already exists on the University of Sydney Research Data Store
-(RDS), download it onto Gadi with the packaged restore helper.
-
-This helper always submits a PBS job on Gadi. It does not run the transfer
-interactively in the login shell.
+#### Option B: Restore Existing Data From RDS
 
 ```bash
 cd /home/562/<nci_username>
@@ -130,112 +97,68 @@ RDS_SFTP_USER=<your_rds_username> \
   /scratch/rg42/AGAR/raw_data/2025/B07
 ```
 
-That command creates:
+This helper submits a PBS job. It does not run the transfer interactively in
+your login shell.
 
-```bash
-/scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5
-```
+Useful notes:
 
-Notes:
-
-- `RDS_SRC` can point to either a file or a directory on RDS
+- `RDS_SRC` can be a file or a directory
 - `GADI_DEST` is the destination parent directory on Gadi
-- run this command from your home directory, for example
-  `/home/562/<nci_username>`, and call the script by its absolute
-  `/g/data/rg42/agar-bactopia-pipeline/...` path if you want the default PBS
-  `.o` and `.e` files to land under home instead of the shared pipeline checkout
-- when you run `/g/data/rg42/agar-bactopia-pipeline/scripts/copy_RDS_to_GADI.sh ...`,
-  the script submits a PBS job and prints the submitted job id
-- if you want to rename the restored folder or file on Gadi, set
-  `GADI_LOCAL_NAME`
-- if you want to resume a partially completed download, keep
-  `RDS_RESUME_DOWNLOAD=1`
-- if you want to skip a restore when the final target already exists, set
-  `RDS_SKIP_IF_DEST_EXISTS=1`
-- if you want the detailed transfer log somewhere explicit, set
-  `DEBUG_LOG_DIR=/scratch/rg42/${USER}/transfer_logs`
-- if you want the PBS `.o` and `.e` files somewhere explicit, set
-  `PBS_LOG_DIR=/scratch/rg42/${USER}/pbs_logs`
-- if you are restoring AGAR raw data, the usual destination is
-  `/scratch/rg42/AGAR/raw_data/<year>/<batch>`
-- if you are restoring previous results or intermediates from RDS, point
-  `GADI_DEST` at the matching location under `/scratch/rg42/AGAR/intermediates/...`
+- set `GADI_LOCAL_NAME` if you want a different name on Gadi
+- set `RDS_RESUME_DOWNLOAD=1` to resume partial downloads
+- set `RDS_SKIP_IF_DEST_EXISTS=1` to skip work when the final target already exists
+- set `DEBUG_LOG_DIR=/scratch/rg42/${USER}/transfer_logs` if you want the detailed transfer log in a known place
+- set `PBS_LOG_DIR=/scratch/rg42/${USER}/pbs_logs` if you want PBS `.o` and `.e` files somewhere explicit
 
-## Metadata Sheet Requirements
+### 3. Prepare The Metadata Folder
 
-The submit wrapper expects exactly one metadata sheet matching
-`*_samplesheet.txt` under `METADATA_DIR`, unless you set `AGRF_SHEET_PATH`
-explicitly.
-
-The default batch family prefix is now `batch_bactopia`, so batch outputs are
-written under paths such as `batch_bactopia_001`,
-`batch_bactopia_001_tools`, and `batch_bactopia_consolidated` unless you
-override `BATCH_PREFIX`.
+Your metadata directory must contain exactly one `*_samplesheet.txt` unless you
+set `AGRF_SHEET_PATH` explicitly.
 
 Preferred metadata columns:
 
-- `Sample name`: sample identifier used to join metadata back onto the
-  consolidated Bactopia outputs
-- `Comments`: free-text phenotype or organism name used by the MLST review
-  logic
+- `Sample name`
+- `Comments`
 
-If either header is missing, the mapper falls back to the first metadata column
-as `Sample name` and the second as `Comments`.
+What those columns mean:
 
-For non-AGAR projects, sample names are not rewritten by the launcher. When
-`IS_AGAR_PROJECT=0` or auto-detection resolves the input as non-AGAR, the
-wrapper skips `normalize_agar_fastq_sample_names.sh` and goes straight to FOFN
-creation or validation.
+- `Sample name` is the identifier used to join metadata back onto the processed results
+- `Comments` is the free-text phenotype or organism note used by downstream review logic
 
-For AGAR projects, the built-in FOFN creator keeps only sample prefixes that
-match `AGAR_SAMPLE_REGEX`, reports the skipped sample prefixes, and excludes
-those other FASTQs from `samplesheet.fofn`. The default AGAR regex is
-`^[0-9]{2}GNB-[0-9]+R?$`, so mixed folders do not carry non-AGAR sample names
-forward unless you provide a custom `samplesheet.fofn` or override the regex
-explicitly.
-Before that validation step, the AGAR filename normalizer can repair sample
-prefixes by replacing `_` with `-` and converting lowercase `gnb` to uppercase
-`GNB`.
+If those headers are missing, the pipeline falls back to:
 
-At the public wrapper layer you can force the mode with
-`--is-agar-project auto|1|0`, for example `--is-agar-project 0` for non-AGAR
-or mixed folders that should skip AGAR normalization.
+- first column as `Sample name`
+- second column as `Comments`
 
-How non-AGAR sample names are managed:
+Important behaviour:
 
-- if the launcher creates `samplesheet.fofn`, the sample name is taken as-is
-  from each FASTQ basename before the first underscore in `*_R1.fastq.gz`
-- if you provide an existing `samplesheet.fofn`, its `sample` values are used
-  as provided
-- in both cases, the metadata `Sample name` column, or the first metadata
-  column when those headers are missing, must match the final sample names in
-  the FOFN because no AGAR-specific renaming is applied
+- for non-AGAR projects, sample names are used as they are
+- for AGAR projects, the launcher can normalize AGAR-style FASTQ names before FOFN creation
+- if `samplesheet.fofn` already exists in `METADATA_DIR`, the launcher reuses it
 
-All other metadata columns are ignored by the metadata-mapping step. They may
-still be kept in your source sheet for lab bookkeeping, but they are not
-required for downstream processing by this pipeline.
+If you have changed the raw FASTQ folder and want the batch list rebuilt,
+delete or move aside the old `samplesheet.fofn` first.
 
-## Installing agar-bactopia-pipeline on Gadi
+For non-AGAR runs:
 
-Example shared install on Gadi:
+- if the launcher creates `samplesheet.fofn`, the sample name is taken from the FASTQ basename before the first underscore in `*_R1.fastq.gz`
+- if you provide your own `samplesheet.fofn`, its `sample` values are used as provided
+- in both cases, metadata sample names must match the final FOFN sample names
 
-```bash
-cd /g/data/rg42
-git clone https://github.com/sethiyap/agar-bactopia-pipeline.git agar-bactopia-pipeline
-cd /home/562/<nci_username>
-```
+### 4. Check The Site Config Once Per Install
 
-Create the shared Gadi site config:
+If you are using the shared `rg42` install and it has already been configured,
+you may not need to touch this step. If you are maintaining the install or
+setting up a new copy, verify the site config first.
+
+Create the local Gadi site config:
 
 ```bash
 cp /g/data/rg42/agar-bactopia-pipeline/config/sites/gadi.env.example \
   /g/data/rg42/agar-bactopia-pipeline/config/sites/gadi.local.env
 ```
 
-Review and edit `config/sites/gadi.local.env` so the server-specific paths are
-correct for that install.
-
-Minimum paths to verify:
+Then review `config/sites/gadi.local.env` and confirm these paths are correct:
 
 - `BACTOPIA_PIPELINE`
 - `DATASETS_CACHE`
@@ -247,37 +170,13 @@ Minimum paths to verify:
 - `MERGE_FIMTYPER_SCRIPT`
 - `SING_CACHE`
 
-Then test the entrypoints:
+### 5. Submit The Pipeline
+
+Normal Gadi submission:
 
 ```bash
-/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia
-/g/data/rg42/agar-bactopia-pipeline/wrappers/submit.gadi.sh --help
-```
+cd /home/562/<nci_username>
 
-For other Linux servers, the repo now also ships a generic Slurm wrapper and
-site-config template:
-
-```bash
-cp config/sites/slurm.env.example config/sites/slurm.local.env
-./wrappers/submit.slurm.sh --help
-```
-
-Edit `config/sites/slurm.local.env` for your site before submitting.
-
-## Quick start on Gadi
-
-1. Copy the site config:
-
-```bash
-cp config/sites/gadi.env.example config/sites/gadi.local.env
-```
-
-2. Edit `config/sites/gadi.local.env` if your shared paths differ.
-
-3. Submit:
-
-```bash
-cd /home/562/ps1744
 /g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
   /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
   /scratch/rg42/AGAR/metadata/2025/B07 \
@@ -285,145 +184,96 @@ cd /home/562/ps1744
   50
 ```
 
-## Submit On Gadi
-
-Public entrypoint:
-
-```bash
-/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi [OPTIONS] RAW_FASTQ_DIR METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
-```
-
-Operational note:
-
-- Run the public command from your home directory, for example
-  `/home/562/ps1744`, rather than from `/g/data/rg42/agar-bactopia-pipeline`.
-  That keeps any default PBS `.o`/`.e` files tied to your user area instead of
-  cluttering the shared `/g/data` install.
-- If you want the PBS `.o`/`.e` files somewhere explicit, set
-  `PBS_LOG_DIR=/scratch/<project>/<user>/pbs_logs` before submission.
-
-Supported options:
-
-- `--additional-tools yes|no`
-  Turns the extra tool bundle on or off for this submission.
-- `--is-agar-project auto|1|0`
-  Controls AGAR auto-detection. Use `1` to force AGAR normalization and AGAR-only
-  FOFN filtering, `0` to skip AGAR-specific handling, or `auto` to use path-based
-  detection.
-- `--site-config /path/to/gadi.local.env`
-  Uses a different site env file instead of the default
-  `/g/data/rg42/agar-bactopia-pipeline/config/sites/gadi.local.env`.
-- `--mail-user you@example.org`
-  Overrides `PBS_MAIL_USER` for this submission only.
-- `--mail-options ae`
-  Overrides `PBS_MAIL_OPTIONS` for this submission only. If you pass
-  `--mail-user` without `--mail-options`, the wrapper defaults to `ae`.
-- `--help`
-  Prints the wrapper usage message.
-
-Positional arguments:
-
-- `RAW_FASTQ_DIR`
-  Directory containing the input FASTQ files.
-- `METADATA_DIR`
-  Directory containing exactly one `*_samplesheet.txt` and optionally
-  `samplesheet.fofn`.
-- `RESULTS_ROOT`
-  Output root for batches, consolidated results, review outputs, and workbook.
-- `BATCH_SIZE`
-  Optional batch size. If omitted, the wrapper uses `BATCH_SIZE_DEFAULT` from
-  config, otherwise `50`. The default split size keeps each PBS batch job
-  small enough to manage on Gadi and makes partial reruns simpler if one batch
-  fails. It is an operational default, not a biological threshold.
-
-## Optional ST131Typer Run
-
-ST131Typer does not run by default. If you want the pipeline to submit
-`run_st131typer_from_assemblies.pbs`, you must explicitly set
-`RUN_ST131_TYPER=1` on the submission command.
-
-Brief install note:
-
-- on `rg42` Gadi, point `ST131_TYPER_DIR` at the shared clone, for example
-  `/g/data/rg42/ST131Typer`
-- on other Linux systems, clone
-  `https://github.com/JohnsonSingerLab/ST131Typer.git` and then set
-  `ST131_TYPER_DIR=/absolute/path/to/ST131Typer`
-- if you want the repo to install a local copy for you, run
-  `./scripts/install_optional_local_tools.sh`
-
-Example:
-
-```bash
-ST131_TYPER_DIR=/g/data/rg42/ST131Typer \
-RUN_ST131_TYPER=1 \
-/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
-  /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
-  /scratch/rg42/AGAR/metadata/2025/B07 \
-  /scratch/rg42/AGAR/intermediates/2025/B07 \
-  50
-```
-
-Important requirements:
-
-- `RUN_ST131_TYPER=1` is required. If you do not set it, no ST131Typer job is
-  submitted.
-- `RUN_COLLECT_ASSEMBLIES=1` must remain enabled unless you explicitly point
-  `ST131_TYPER_INPUT_DIR` at an existing assemblies directory.
-- when you launch through `submit_agar_full_pipeline.sh` or
-  `bin/agar-bactopia submit gadi`, the core batch workflow, consolidation, AGRF
-  mapping, and MLST review chain now finish first; only then does the launcher
-  collect flattened assemblies and submit ST131Typer
-- set `ST131_APPEND_AFTER_WORKBOOK=1` if you want the main workbook first, then
-  a delayed ST131Typer run, then an append-only workbook update that adds the
-  `st131typer_summary` sheet afterward
-- if ST131Typer is installed outside the pipeline repo, define
-  `ST131_TYPER_DIR=/absolute/path/to/ST131Typer`
-- `ST131Typer.sh` must be available, by default at `<repo_root>/ST131Typer.sh`,
-  or you must set
-  `ST131_TYPER_SCRIPT=/absolute/path/to/ST131Typer.sh`.
-- the standalone append helper also defaults `ST131_TYPER_SCRIPT` to
-  `<repo_root>/ST131Typer.sh`, so you can run it from outside the repo checkout
-  as long as that script exists in the cloned pipeline root
-- the ST131 wrapper now writes `st131typer.stdout.log` and
-  `st131typer.stderr.log` into `ST131_TYPER_OUTPUT_DIR` and fails the PBS job if
-  `summary.txt` is missing or empty
-- for non-`rg42` or non-Gadi installs, see `For Non-Gadi And Non-rg42 Users`
-  below for local installation guidance
-
-If ST131Typer has already been run and the existing output directory
-`<RESULTS_ROOT>/<basename(RESULTS_ROOT)>_st131typer` is present, you can reuse
-that directory during workbook export without submitting a new ST131Typer job by
-setting `USE_EXISTING_ST131_TYPER=1`. You can override the directory with
-`ST131_TYPER_OUTPUT_DIR=/absolute/path/to/existing_st131typer_dir`.
-
-If you only want to run ST131Typer later against an existing assemblies folder
-and append its summary into the final workbook, use:
-
-```bash
-ST131_TYPER_DIR=/g/data/rg42/ST131Typer \
-./scripts/submit_st131typer_append.sh \
-  /scratch/rg42/AGAR/intermediates/2025/B07/batch_bactopia_001_assemblies \
-  /scratch/rg42/AGAR/intermediates/2025/B07/batch_bactopia_results.xlsx
-```
-
-## Common Examples
-
-### Default Submission
-
-Submit a standard Gadi run with the default pipeline behavior.
+Command shape:
 
 ```bash
 /g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
-  /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
-  /scratch/rg42/AGAR/metadata/2025/B07 \
-  /scratch/rg42/AGAR/intermediates/2025/B07 \
-  50
+  [OPTIONS] RAW_FASTQ_DIR METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
 ```
 
-### Enable The Additional Tools Bundle
+Main public options:
 
-Turn on the extra non-core typing and screening tools for the run.
+- `--additional-tools yes|no`: turn the extra tool bundle on or off
+- `--is-agar-project auto|1|0`: control AGAR-specific normalization and filtering
+- `--site-config /path/to/gadi.local.env`: use a different site config file
+- `--mail-user you@example.org`: override `PBS_MAIL_USER` for one submission
+- `--mail-options ae`: override `PBS_MAIL_OPTIONS` for one submission
+
+Arguments:
+
+- `RAW_FASTQ_DIR`: folder containing the input FASTQ files
+- `METADATA_DIR`: folder containing the metadata sheet and optionally `samplesheet.fofn`
+- `RESULTS_ROOT`: where batch outputs, consolidated outputs, mapped TSVs, and workbook are written
+- `BATCH_SIZE`: optional; if omitted, the config default is used, otherwise `50`
+
+The default batch family prefix is `batch_bactopia`, so outputs usually appear
+under names such as:
+
+- `batch_bactopia_001`
+- `batch_bactopia_001_tools`
+- `batch_bactopia_consolidated`
+
+### 6. What Happens After Submission
+
+After you submit, the launcher usually does the following in order:
+
+1. validates the raw-data and metadata inputs
+2. creates or reuses `samplesheet.fofn`
+3. splits the FOFN into batch files
+4. submits one PBS job per batch
+5. consolidates the batch outputs
+6. maps the consolidated results back to the metadata sheet
+7. runs MLST review for flagged samples when enabled
+8. exports the results workbook when enabled
+
+If you also turn on ST131Typer, that runs later in the chain after the core
+workflow has finished.
+
+### 7. Copy Finished Results Back To RDS
+
+After the run finishes on Gadi, use the packaged upload helper. The recommended
+pattern is `export ...` followed by `qsub -V`.
+
+This is safer than `qsub -v` when you need to pass larger environment values
+such as long include lists.
+
+Copy a finished results root:
+
+```bash
+export SRC_PATH=/scratch/rg42/AGAR/intermediates/2025/B07
+export RDS_DEST=/rds/PRJ-AGAR/PRJ-AGAR/intermediates/2025/B07
+export RDS_SFTP_USER=<your_rds_username>
+export DEBUG_LOG_DIR=/scratch/rg42/${USER}/transfer_logs
+export RDS_UPLOAD_MANIFEST_DIR=/scratch/rg42/${USER}/.rds_transfer_manifests
+mkdir -p "$DEBUG_LOG_DIR" "$RDS_UPLOAD_MANIFEST_DIR"
+qsub -V /g/data/rg42/agar-bactopia-pipeline/scripts/jobsubmission_transfer_gadi_to_rds.pbs
+```
+
+Copy only the main deliverables first:
+
+```bash
+export SRC_PATH=/scratch/rg42/AGAR/intermediates/2025/B07
+export RDS_DEST=/rds/PRJ-AGAR/PRJ-AGAR/intermediates/2025/B07
+export RDS_SFTP_USER=<your_rds_username>
+export RDS_INCLUDE_DIRS='AGRF_samplesheet_with_results.tsv,batch_bactopia_consolidated'
+export DEBUG_LOG_DIR=/scratch/rg42/${USER}/transfer_logs
+export RDS_UPLOAD_MANIFEST_DIR=/scratch/rg42/${USER}/.rds_transfer_manifests
+mkdir -p "$DEBUG_LOG_DIR" "$RDS_UPLOAD_MANIFEST_DIR"
+qsub -V /g/data/rg42/agar-bactopia-pipeline/scripts/jobsubmission_transfer_gadi_to_rds.pbs
+```
+
+Transfer notes:
+
+- `RDS_SFTP_USER` is required for uploads
+- passwords are not stored in the script
+- the wrapper defaults to scratch-backed debug and manifest locations if you do not override them
+- by default, `_work` and `.nextflow.log*` are excluded from upload
+
+## Common Variations
+
+These are the most common changes to the standard submission command.
+
+### Turn On The Additional Tools Bundle
 
 ```bash
 /g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
@@ -434,42 +284,7 @@ Turn on the extra non-core typing and screening tools for the run.
   50
 ```
 
-### Run Non-Kleborate Tools In Parallel
-
-For faster completion, submit one non-Kleborate tool job per tool after
-assembly.
-
-**Use `RUN_TOOLS_PARALLEL=1` when you want to speed up the run. This can reduce
-wall-clock time when the cluster is quiet enough, or when your project has
-enough free capacity for those tool jobs to run concurrently.**
-
-```bash
-RUN_TOOLS_PARALLEL=1 \
-/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
-  /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
-  /scratch/rg42/AGAR/metadata/2025/B07 \
-  /scratch/rg42/AGAR/intermediates/2025/B07 \
-  50
-```
-
-### Run Non-Kleborate Tools Sequentially
-
-Keep the existing single bundled tools job instead of parallel per-tool jobs.
-
-```bash
-RUN_TOOLS_PARALLEL=0 \
-/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
-  /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
-  /scratch/rg42/AGAR/metadata/2025/B07 \
-  /scratch/rg42/AGAR/intermediates/2025/B07 \
-  50
-```
-
-If `RUN_TOOLS_PARALLEL` is unset, the default is `0`.
-
 ### Force Non-AGAR Mode
-
-Skip AGAR-specific normalization and filtering for mixed or non-AGAR inputs.
 
 ```bash
 /g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
@@ -482,8 +297,6 @@ Skip AGAR-specific normalization and filtering for mixed or non-AGAR inputs.
 
 ### Use A Different Site Config
 
-Point the submitter at a non-default `gadi.local.env` file.
-
 ```bash
 /g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
   --site-config /g/data/rg42/agar-bactopia-pipeline/config/sites/gadi.local.env \
@@ -495,8 +308,6 @@ Point the submitter at a non-default `gadi.local.env` file.
 
 ### Override PBS Mail Settings
 
-Send scheduler mail for one submission without changing shared defaults.
-
 ```bash
 /g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
   --mail-user your.name@example.org \
@@ -507,9 +318,22 @@ Send scheduler mail for one submission without changing shared defaults.
   50
 ```
 
-### Test One Batch
+### Run Non-Kleborate Tools In Parallel
 
-Submit only a named batch when you want a small validation run.
+```bash
+RUN_TOOLS_PARALLEL=1 \
+/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
+  /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
+  /scratch/rg42/AGAR/metadata/2025/B07 \
+  /scratch/rg42/AGAR/intermediates/2025/B07 \
+  50
+```
+
+If `RUN_TOOLS_PARALLEL` is unset, the default is `0`.
+
+### Test A Small Subset
+
+Run only one named batch:
 
 ```bash
 BATCH_IDS=005 BATCH_LIMIT=1 \
@@ -520,9 +344,7 @@ BATCH_IDS=005 BATCH_LIMIT=1 \
   50
 ```
 
-### Start From Batch 3
-
-Resume or retry from a later batch instead of rerunning from batch 1.
+Start later in the batch list:
 
 ```bash
 BATCH_START=3 BATCH_LIMIT=2 \
@@ -533,10 +355,10 @@ BATCH_START=3 BATCH_LIMIT=2 \
   50
 ```
 
-### Run Postprocess Only
+### Rerun Postprocessing Only
 
-Skip batch execution and rerun only consolidation, MLST review, and workbook
-export on an existing `RESULTS_ROOT`.
+Use this when the batches already exist and you only want consolidation,
+review, or workbook export again.
 
 ```bash
 POSTPROCESS_ONLY=1 \
@@ -550,30 +372,15 @@ RUN_EXPORT_RESULTS_WORKBOOK=1 \
   50
 ```
 
-### Reuse Existing ST131Typer Output During Workbook Export
+In `POSTPROCESS_ONLY=1` mode, the trailing `50` does not limit the work to 50
+samples. Consolidation runs across all batch directories already present under
+`RESULTS_ROOT`.
 
-If `RESULTS_ROOT` already contains a matching `*_st131typer` directory, reuse
-it during workbook export without submitting a new ST131Typer job.
+## Optional ST131Typer Workflow
 
-```bash
-POSTPROCESS_ONLY=1 \
-RUN_CONSOLIDATE=0 \
-RUN_MLST_REVIEW=0 \
-RUN_EXPORT_RESULTS_WORKBOOK=1 \
-USE_EXISTING_ST131_TYPER=1 \
-/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
-  /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
-  /scratch/rg42/AGAR/metadata/2025/B07 \
-  /scratch/rg42/AGAR/intermediates/2025/B07 \
-  50
-```
+ST131Typer is optional and does not run by default.
 
-### Run ST131Typer During The Main Submission
-
-Submit ST131Typer as part of the main AGAR launcher flow. The top-level launcher
-now waits for the core workflow, consolidation, AGRF mapping, and MLST review
-chain to finish, then collects the flattened assemblies folder and submits
-ST131Typer before the final workbook export.
+To include it in the main submission:
 
 ```bash
 ST131_TYPER_DIR=/g/data/rg42/ST131Typer \
@@ -585,10 +392,14 @@ RUN_ST131_TYPER=1 \
   50
 ```
 
-### Export Workbook First, Then Append ST131Typer
+Important points:
 
-If you want the main summarized workbook as early as possible, export it first,
-then run ST131Typer afterward and append only the `st131typer_summary` sheet.
+- `RUN_ST131_TYPER=1` is required
+- on `rg42` Gadi, `ST131_TYPER_DIR=/g/data/rg42/ST131Typer` is the usual shared location
+- the core batch workflow finishes before ST131Typer is submitted
+- `RUN_COLLECT_ASSEMBLIES=1` must stay enabled unless you point `ST131_TYPER_INPUT_DIR` at an existing assemblies folder
+
+If you want the workbook first and the ST131 sheet appended later:
 
 ```bash
 ST131_TYPER_DIR=/g/data/rg42/ST131Typer \
@@ -601,10 +412,8 @@ ST131_APPEND_AFTER_WORKBOOK=1 \
   50
 ```
 
-### Append ST131Typer Summary To An Existing Workbook
-
-Run ST131Typer separately against an existing assemblies folder and append its
-summary sheet into an existing workbook.
+If you already have an assemblies folder and just want to append the ST131
+summary into an existing workbook:
 
 ```bash
 ST131_TYPER_DIR=/g/data/rg42/ST131Typer \
@@ -613,267 +422,135 @@ ST131_TYPER_DIR=/g/data/rg42/ST131Typer \
   /scratch/rg42/AGAR/intermediates/2025/B07/batch_bactopia_results.xlsx
 ```
 
-## MLST Review And Discrepancy Resolution
+If ST131Typer output already exists and matches the run, you can reuse it
+during workbook export by setting `USE_EXISTING_ST131_TYPER=1`.
 
-The pipeline includes a review-driven standalone MLST follow-up for flagged
-isolates.
+## Important Outputs
 
-Brief install note:
+The most useful outputs for most users are:
 
-- the standalone MLST review helper needs `mlst` and `seqkit`
-- on `rg42` Gadi, these usually come from the shared Miniforge install and
-  shared `mlst_env`
-- on other Linux systems, install Miniforge, create a Conda environment with
-  `mlst` and `seqkit`, then point the pipeline at `MINIFORGE_ROOT` and
-  `MLST_ENV`
-- if you want the repo to install local copies for you, run
-  `./scripts/install_optional_local_tools.sh`
+- `batch_bactopia_001`, `batch_bactopia_002`, and so on: per-batch run folders
+- `batch_bactopia_consolidated`: merged summary outputs across batches
+- `AGRF_samplesheet_with_results.tsv`: metadata plus mapped tool results
+- `AGRF_samplesheet_with_results_review_required.tsv`: rows flagged for MLST follow-up
+- `AGRF_samplesheet_with_results_mlst_reviewed.tsv`: preferred final reviewed TSV when present
+- final workbook under `RESULTS_ROOT`: exported Excel summary
 
-Review logic:
+Common metadata and review columns:
 
-- `map_agrf_samplesheet_results.R` compares the AGRF phenotype label in
-  `Comments` to the genus implied by the MLST scheme
-- samples are flagged `review_required == "yes"` when there is a
-  phenotype-vs-MLST genus mismatch, an ambiguous MLST profile, or MLST warning
-  text that needs follow-up
-- only those flagged samples are rerun through the standalone review MLST step
+- always expected from metadata: `Sample name`, `Comments`
+- common mapped result fields: MLST, Kleborate, FimTyper, abritAMR, PlasmidFinder, Bracken
+- common review fields: `review_required`, `review_reason`, `mlst_review_note`
 
-Resolution logic:
-
-- the raw automatic MLST call is preserved as `auto_scheme`, `auto_st`, and
-  `auto_profile`
-- if automatic `mlst` reports an ambiguity or tie and one tied scheme matches
-  the AGRF phenotype, the helper reruns `mlst --scheme <matching>` and saves
-  that as the resolved call
-- if there is no phenotype-matching tied scheme, the resolved call stays the
-  same as the automatic highest-scoring MLST result
-- resolved outputs are written as `resolved_scheme`, `resolved_st`, and
-  `resolved_profile`, with `resolution_note` showing how the discrepancy was
-  handled
-
-Outputs:
-
-- `AGRF_samplesheet_with_results_review_required.tsv`
-- `mlst_review_standalone/mlst_review.tsv`
-- `AGRF_samplesheet_with_results_mlst_reviewed.tsv`
-- optional `AGRF_samplesheet_with_results_post_review.tsv`
-
-If `AGRF_samplesheet_with_results_mlst_reviewed.tsv` is present, it is the
-preferred reviewed output; otherwise use
+If `AGRF_samplesheet_with_results_mlst_reviewed.tsv` exists, use that as the
+preferred reviewed table. If it does not exist, use
 `AGRF_samplesheet_with_results.tsv`.
 
-When `RUN_EXPORT_RESULTS_WORKBOOK=1`, the launcher submits
-`run_export_bactopia_results_workbook.pbs` after mapping and optional MLST
-review. The exporter prefers
-`AGRF_samplesheet_with_results_mlst_reviewed.tsv` when present and otherwise
-falls back to `AGRF_samplesheet_with_results.tsv`.
+## Troubleshooting And Operational Notes
 
-In `POSTPROCESS_ONLY=1` mode, the trailing `50` does not limit the work to 50
-samples. Consolidation runs across all batch directories already present under
-the selected `RESULTS_ROOT`.
+### If The Batch Count Looks Wrong
 
-If you do not set `BATCH_LIMIT`, the launcher now submits all batch files
-implied by `samplesheet.fofn` and `BATCH_SIZE`. For example, about 284 samples
-at `BATCH_SIZE=50` yields 6 batch files, and about 150 samples yields 3 batch
-files.
+The launcher builds batch files from `samplesheet.fofn`, not directly from the
+number of FASTQ files in the raw-data directory.
 
-The launcher now runs an inode preflight against `RESULTS_ROOT` before
-submission. On Gadi scratch it checks filesystem inode headroom and also looks
-for project scratch quota issues via `lquota` or `nci_account`. Set
-`CHECK_INODE_QUOTA=0` to skip it, or tune `INODE_FS_WARN_FREE_PCT`,
-`INODE_FS_MIN_FREE_COUNT`, `INODE_FS_MIN_FREE_PCT`,
-`PROJECT_INODE_WARN_USE_PCT`, and `PROJECT_INODE_MAX_USE_PCT`.
-An inode limit is a file-count limit, not a size limit, so you can hit it even
-when there is still disk space left. If this check fails on Gadi, clean up old
-batch result folders, `work/` directories, and other no-longer-needed files
-under your project scratch area such as `/scratch/rg42/...`.
+Check these first:
 
-If free inode headroom drops below 15%, the launcher now prints a warning
-before submission so you can decide whether to stop, clean scratch, and rerun.
-The pipeline only hard-fails when the stricter stop thresholds are crossed.
+- does `METADATA_DIR/samplesheet.fofn` already exist
+- does the row count in `samplesheet.fofn` match the number of samples you expect
+- did the launcher reuse an old FOFN from a previous run
 
-**How to get rid of an inode overload error on Gadi:**
+If the FOFN is stale, move it aside, clear old batch shard files if needed, and
+submit again.
 
-- check whether the problem is filesystem inode headroom or project quota:
-  `df -Pi /scratch/rg42/...`, `lquota`, and `nci_account -P rg42`
-- remove old small-file-heavy scratch directories first, especially stale
-  Nextflow `work/` trees, old `batch_bactopia_*` result folders, and abandoned
-  temporary outputs under your previous `RESULTS_ROOT` paths
-- if the run has already finished and you only need the deliverables, archive
-  or transfer the final outputs elsewhere, then delete the older scratch copy
-- if scratch is crowded across multiple runs, start the next submission with a
-  fresh `RESULTS_ROOT` instead of reusing a directory full of old batch files
-- do not rely on `CHECK_INODE_QUOTA=0` as the fix: that only skips the early
-  guardrail and the job can still fail later if scratch inode usage is still
-  too high
+### Inode Warnings On Gadi
 
-For retry work on a specific batch or subset, the batch submitter accepts:
+The launcher runs an inode preflight against `RESULTS_ROOT`. An inode limit is
+a file-count limit, not a disk-size limit.
 
-- `BATCH_START` for a 1-based starting batch number
-- `BATCH_LIMIT` for how many batches to submit from that point when you want a
-  smaller subset than the default all-batches behavior
-- `BATCH_IDS` for an exact comma-separated subset such as `001` or
-  `batch_bactopia_001,batch_bactopia_004`
+If you hit an inode warning or failure on Gadi:
 
-## Mapped Results Output
+- check `df -Pi /scratch/rg42/...`
+- check `lquota`
+- check `nci_account -P rg42`
+- delete stale small-file-heavy directories first, especially old `work/` trees and old batch result folders
 
-The metadata-mapped results table is derived from the sample names present in
-the consolidated outputs. Your `*_samplesheet.txt` is then used to attach the
-matching metadata columns for those processed samples only.
+The warning threshold is earlier than the hard-stop threshold. That gives you a
+chance to clean scratch before the run fails later.
 
-Always-present metadata columns:
+### MLST Review Logic
 
-- `Sample name`: sample identifier from the metadata sheet
-- `Comments`: phenotype label or free-text lab note from the metadata sheet
+The review helper compares the phenotype note in `Comments` with the genus
+implied by the MLST scheme.
 
-Optional result columns added when the corresponding tool outputs exist:
+A sample is flagged when there is:
 
-- `mlst_scheme`: MLST scheme assigned to the sample
-- `mlst_st`: MLST sequence type
-- `mlst_profile`: MLST allele profile summary
-- `kleborate_species`: species call from Kleborate
-- `kleborate_species_match`: whether the Kleborate species agrees with the
-  metadata phenotype/genus expectation
-- `kleborate_st`: Kleborate sequence type when reported
-- `kleborate_virulence_score`: Kleborate virulence score
-- `kleborate_resistance_score`: Kleborate resistance score
-- `kleborate_k_locus`: Klebsiella K locus call
-- `kleborate_k_type`: Klebsiella capsule type derived from the K locus
-- `kleborate_o_locus`: Klebsiella O locus call
-- `kleborate_o_type`: Klebsiella O antigen type derived from the O locus
-- `fimtyper_fimtype`: FimTyper fimbrial type call
-- `fimtyper_identity`: identity score or percent identity reported by FimTyper
-- `abritamr_beta_lactam`: beta-lactam resistance summary from abritAMR
-- `abritamr_esbl`: ESBL resistance summary from abritAMR
-- `abritamr_carbapenemase`: carbapenemase resistance summary from abritAMR
-- `abritamr_quinolone`: quinolone resistance summary from abritAMR
-- `abritamr_sulfonamide`: sulfonamide resistance summary from abritAMR
-- `plasmidfinder_replicon`: plasmid replicon summary from PlasmidFinder
-- `plasmidfinder_plasmid`: plasmid call or summary from PlasmidFinder
-- `bracken_primary_species`: top Bracken species assignment
-- `bracken_primary_species_abundance`: abundance for the top Bracken species
-- `bracken_secondary_species`: second-ranked Bracken species assignment
-- `bracken_secondary_species_abundance`: abundance for the second-ranked Bracken species
-- `bracken_unclassified_abundance`: Bracken abundance assigned as unclassified
+- a phenotype-vs-MLST mismatch
+- an ambiguous MLST profile
+- MLST warning text that needs follow-up
 
-Review columns:
+The automatic MLST call is preserved as:
 
-- `review_required`: `yes` when the MLST result needs manual or standalone
-  review, otherwise `no`
-- `review_reason`: explanation for why the sample was flagged
-- `mlst_review_note`: present in the reviewed mapped TSV; explains how the
-  standalone MLST review resolved, or failed to resolve, the flagged sample
+- `auto_scheme`
+- `auto_st`
+- `auto_profile`
 
-If a reviewed table is available, the standalone MLST values are written back
-into `mlst_scheme`, `mlst_st`, and `mlst_profile` in the reviewed TSV.
+Resolved review outputs are written as:
 
-## Copy Finished Results Back To RDS
+- `resolved_scheme`
+- `resolved_st`
+- `resolved_profile`
+- `resolution_note`
 
-After the pipeline finishes on Gadi, use the packaged Gadi-to-RDS upload helper:
+### Transfer Notes
 
-- `scripts/transfer_gadi_to_rds.sh`: the transfer helper
-- `scripts/jobsubmission_transfer_gadi_to_rds.pbs`: the PBS wrapper to submit on Gadi
+- `RDS_SFTP_USER` is required for packaged uploads
+- the script does not store a password
+- `RDS_IGNORE_MANIFEST=1` forces a reupload when files were already recorded in the manifest
+- `RDS_INCLUDE_DIRS` is source-relative and works for exact paths, not shell globs
 
-The recommended submission pattern is shell `export ...` followed by `qsub -V`.
-This avoids the PBS environment-size problems that can happen with `qsub -v`,
-especially when `RDS_INCLUDE_DIRS` contains multiple comma-separated paths.
+## Shared Install And Other Systems
 
-You must set `RDS_SFTP_USER` explicitly for uploads. The packaged helper keeps
-the RDS host default, but it does not hardcode any personal username or
-password.
+### Shared Install On Gadi
 
-On the shared Gadi install, the PBS wrapper will also try the packaged helper
-under `/g/data/<project>/agar-bactopia-pipeline/scripts/transfer_gadi_to_rds.sh`
-before it errors. Explicitly exporting `TRANSFER_SCRIPT` is still the safest
-portable option when you are not using that shared layout.
-
-The packaged wrapper now defaults these paths onto scratch when you do not
-override them:
-
-- `DEBUG_LOG_DIR=/scratch/rg42/${USER}/transfer_logs`
-- `RDS_UPLOAD_MANIFEST_DIR=/scratch/rg42/${USER}/.rds_transfer_manifests`
-
-The packaged wrapper also skips these by default unless you override the
-settings:
-
-- `RDS_EXCLUDE_DIRS=_work`
-- `RDS_EXCLUDE_FILES=.nextflow.log,.nextflow.log.*`
-
-By default, the detailed `transfer_gadi_to_rds.*.run.log` is deleted after a
-successful transfer so scratch does not fill with stale debug traces. If you
-want to keep that helper log for a successful run, set `KEEP_DEBUG_LOG=1`
-before `qsub`.
-
-For authentication, `sftp` will usually prompt for your RDS password unless
-your Gadi session already has working SSH key or agent-based authentication for
-that RDS endpoint.
-
-### Useful Transfer Controls
-
-- `RDS_IGNORE_MANIFEST=1` forces a requeue when files were already recorded in
-  the upload manifest but need to be uploaded again.
-- `RDS_PRIORITIZE_UPLOADS=0` skips the extra ranking step and can help on very
-  large trees with many small files.
-- `RDS_INCLUDE_DIRS` is source-relative and prefix-based. It works for exact
-  file paths too, but not shell globs like `*_bracken_only`.
-- `RDS_EXCLUDE_DIRS` defaults to `_work`, so noisy workflow scratch directories
-  are skipped by default.
-- `RDS_EXCLUDE_FILES` defaults to `.nextflow.log,.nextflow.log.*`, so those
-  Nextflow log files are skipped by default.
-- `RDS_EXCLUDE_PATHS` is available when you want to exclude specific
-  source-relative paths rather than whole directory prefixes or basename
-  patterns.
-
-### Copy A Finished Batch Results Root
-
-Copy an existing finished results folder such as `/scratch/rg42/AGAR/intermediates/2025/B07`
-back to the matching RDS location:
+If you are maintaining a shared install on Gadi:
 
 ```bash
-export SRC_PATH=/scratch/rg42/AGAR/intermediates/2025/B07
-export RDS_DEST=/rds/PRJ-AGAR/PRJ-AGAR/intermediates/2025/B07
-export RDS_SFTP_USER=<your_rds_username>
-export DEBUG_LOG_DIR=/scratch/rg42/${USER}/transfer_logs
-export RDS_UPLOAD_MANIFEST_DIR=/scratch/rg42/${USER}/.rds_transfer_manifests
-mkdir -p "$DEBUG_LOG_DIR" "$RDS_UPLOAD_MANIFEST_DIR"
-qsub -V /g/data/rg42/agar-bactopia-pipeline/scripts/jobsubmission_transfer_gadi_to_rds.pbs
+cd /g/data/rg42
+git clone https://github.com/sethiyap/agar-bactopia-pipeline.git agar-bactopia-pipeline
+cd /home/562/<nci_username>
 ```
 
-### Copy Only The Main Deliverables First
-
-If you want the most useful outputs copied first, keep the source rooted at the
-results folder and narrow the upload with `RDS_INCLUDE_DIRS`. The helper also
-prioritizes `AGRF_samplesheet_with_results.tsv` first and then any
-`*_consolidated/` directory before lower-priority files.
+Create the site config:
 
 ```bash
-export SRC_PATH=/scratch/rg42/AGAR/intermediates/2025/B07
-export RDS_DEST=/rds/PRJ-AGAR/PRJ-AGAR/intermediates/2025/B07
-export RDS_SFTP_USER=<your_rds_username>
-export RDS_INCLUDE_DIRS='AGRF_samplesheet_with_results.tsv,batch_bactopia_consolidated'
-export DEBUG_LOG_DIR=/scratch/rg42/${USER}/transfer_logs
-export RDS_UPLOAD_MANIFEST_DIR=/scratch/rg42/${USER}/.rds_transfer_manifests
-mkdir -p "$DEBUG_LOG_DIR" "$RDS_UPLOAD_MANIFEST_DIR"
-qsub -V /g/data/rg42/agar-bactopia-pipeline/scripts/jobsubmission_transfer_gadi_to_rds.pbs
+cp /g/data/rg42/agar-bactopia-pipeline/config/sites/gadi.env.example \
+  /g/data/rg42/agar-bactopia-pipeline/config/sites/gadi.local.env
 ```
 
-## For Non-Gadi And Non-`rg42` Users
+Then verify the entrypoints:
 
-If you are not using the shared `rg42` Gadi install, the clone alone is not
-enough to provide every external helper. The repo does not auto-install these
-tools on clone; install them only if they are not already available at your
-site.
+```bash
+/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia
+/g/data/rg42/agar-bactopia-pipeline/wrappers/submit.gadi.sh --help
+```
 
-Standalone MLST review helper:
+Keep the shared code in `/g/data`, but keep launch commands, PBS logs, and
+other mutable runtime files in user or scratch paths.
 
-- `run_review_mlst_from_tsv.sh` expects a Miniforge/Conda activation root via
-  `MINIFORGE_ROOT`
-- the activated environment at `MLST_ENV` must provide both `mlst` and `seqkit`
-- on `rg42` Gadi these usually point at the shared
-  `/g/data/<PROJECT>/bactopia_datasets/miniforge3` and
-  `/g/data/<PROJECT>/bactopia_datasets/envs/mlst_env`
+### Non-Gadi Or Non-`rg42` Linux Systems
 
-Example Miniforge + MLST environment setup on a generic Linux host:
+If you are not using the shared `rg42` Gadi install, cloning this repo is not
+enough by itself. You must also provide the external dependencies expected by
+the wrappers.
+
+Standalone MLST review helper requirements:
+
+- `MINIFORGE_ROOT`
+- `MLST_ENV`
+- `mlst`
+- `seqkit`
+
+Example local setup:
 
 ```bash
 MINIFORGE_ROOT=$PWD/miniforge3
@@ -899,22 +576,16 @@ If you want the repo to manage local copies for you, use:
 ```
 
 That helper installs Miniforge under `<repo_root>/.local`, creates a local
-`mlst` + `seqkit` Conda environment, clones
-`https://github.com/JohnsonSingerLab/ST131Typer.git`, and links
-`<repo_root>/ST131Typer.sh` to the cloned script so the existing wrapper
-defaults keep working.
+`mlst` plus `seqkit` environment, and clones ST131Typer.
 
-ST131Typer helper:
+### ST131Typer Outside `rg42`
 
-- the ST131Typer steps do not bundle `ST131Typer.sh`
-- if ST131Typer is installed in its own folder, set
-  `ST131_TYPER_DIR=/absolute/path/to/ST131Typer`
-- by default the launchers expect it at `<repo_root>/ST131Typer.sh`
-- if you keep it elsewhere, set `ST131_TYPER_SCRIPT=/absolute/path/to/ST131Typer.sh`
-- if the ST131Typer script itself depends on `seqkit`, make sure the same shell
-  or Conda environment used to run ST131Typer has `seqkit` on `PATH`
+- the repo does not bundle `ST131Typer.sh`
+- set `ST131_TYPER_DIR=/absolute/path/to/ST131Typer` if the clone lives elsewhere
+- or set `ST131_TYPER_SCRIPT=/absolute/path/to/ST131Typer.sh`
+- if ST131Typer depends on `seqkit`, make sure the same environment has `seqkit` on `PATH`
 
-Minimal verification for non-`rg42` installs:
+Minimal verification:
 
 ```bash
 test -f /absolute/path/to/ST131Typer.sh
@@ -924,36 +595,9 @@ command -v mlst
 command -v seqkit
 ```
 
-## Submit On Slurm
+## Slurm Usage
 
-Public entrypoint:
-
-```bash
-./bin/agar-bactopia submit slurm [OPTIONS] RAW_FASTQ_DIR METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
-```
-
-First-time setup:
-
-```bash
-cp config/sites/slurm.env.example config/sites/slurm.local.env
-```
-
-Edit `config/sites/slurm.local.env` for your site paths, especially:
-
-- `BACTOPIA_PIPELINE`
-- `DATASETS_CACHE`
-- `KRAKEN2_DB`
-- `NEXTFLOW_CONFIG`
-- `FIMTYPER_PIPELINE`
-- `FIMTYPER_CONFIG`
-- `MINIFORGE_ROOT`
-- `MLST_ENV`
-- `SING_CACHE`
-- optional `SLURM_PARTITION`
-- optional `SLURM_ACCOUNT`
-- optional `SLURM_CLUSTER_OPTIONS`
-
-Example:
+For Linux sites that use Slurm instead of PBS:
 
 ```bash
 ./bin/agar-bactopia submit slurm \
@@ -964,31 +608,45 @@ Example:
   50
 ```
 
-The public options are the same as `submit gadi`: `--additional-tools`,
-`--is-agar-project`, `--site-config`, `--mail-user`, and `--mail-options`.
+First-time Slurm setup:
 
-### Packaged Backends
+```bash
+cp config/sites/slurm.env.example config/sites/slurm.local.env
+```
 
-- `gadi`: PBS Pro wrapper and Gadi-oriented shared-path defaults
-- `slurm`: generic Slurm wrapper and Linux-oriented site template
+Check the Slurm site config and verify paths such as:
 
-Both backends still assume a Linux execution site with Nextflow plus
-Singularity or Apptainer available. Cloning the repo on macOS is fine for code
-inspection and editing, but the packaged pipeline runners are not a native
-macOS execution target.
+- `BACTOPIA_PIPELINE`
+- `DATASETS_CACHE`
+- `KRAKEN2_DB`
+- `NEXTFLOW_CONFIG`
+- `FIMTYPER_PIPELINE`
+- `FIMTYPER_CONFIG`
+- `MINIFORGE_ROOT`
+- `MLST_ENV`
+- `SING_CACHE`
 
-## Layout
+Optional Slurm settings include:
 
-- `bin/agar-bactopia`: public CLI
-- `wrappers/submit.gadi.sh`: Gadi-facing submission wrapper
-- `wrappers/submit.slurm.sh`: generic Slurm-facing submission wrapper
+- `SLURM_PARTITION`
+- `SLURM_ACCOUNT`
+- `SLURM_CLUSTER_OPTIONS`
+
+The public options are the same as the Gadi backend:
+
+- `--additional-tools`
+- `--is-agar-project`
+- `--site-config`
+- `--mail-user`
+- `--mail-options`
+
+## Repository Layout
+
+- `bin/agar-bactopia`: public command-line entrypoint
+- `wrappers/submit.gadi.sh`: PBS Pro submission wrapper for Gadi
+- `wrappers/submit.slurm.sh`: generic Slurm submission wrapper
 - `config/defaults.env`: scheduler-agnostic defaults
-- `config/sites/`: site-specific shared paths
-- `scripts/`: internal pipeline helpers plus scheduler job wrappers
-- `docs/runtime-dependencies.md`: bundled-vs-external runtime dependency audit
+- `config/sites/`: site-specific configuration files
+- `scripts/`: helper scripts and job wrappers
+- `docs/runtime-dependencies.md`: bundled versus external dependency notes
 - `docs/gadi-shared-install-checklist.md`: shared Gadi deployment checklist
-
-## Next steps
-
-- move more runtime assumptions out of PBS scripts into site configs
-- add install and validation docs under `docs/`

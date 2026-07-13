@@ -42,6 +42,9 @@ Optional environment variables:
   RDS_SFTP_HOST             Default: research-data-ext.sydney.edu.au
   RDS_SFTP_IDENTITY_FILE    Optional SSH private key file for sftp; when set
                             the helper adds `-i <file> -o IdentitiesOnly=yes`
+  RDS_SFTP_USE_PASSWORD     If set to 1, prompt for the RDS password before qsub
+  RDS_SFTP_PASSWORD_FILE    Optional file containing the SFTP password; when set
+                            the helper uses expect-driven password auth
   RDS_SFTP_OPTS             Extra options passed to sftp, for example: -v
   RDS_RESUME_DOWNLOAD       If set to 1, attempt resumable download mode, default: 1
   RDS_SKIP_IF_DEST_EXISTS   If set to 1, skip the download when the final local target already exists
@@ -61,6 +64,9 @@ RDS_SFTP_USER=${RDS_SFTP_USER:-${USER:-}}
 GADI_LOCAL_NAME=${GADI_LOCAL_NAME:-}
 RDS_SFTP_HOST=${RDS_SFTP_HOST:-research-data-ext.sydney.edu.au}
 RDS_SFTP_IDENTITY_FILE=${RDS_SFTP_IDENTITY_FILE:-}
+RDS_SFTP_USE_PASSWORD=${RDS_SFTP_USE_PASSWORD:-0}
+RDS_SFTP_PASSWORD_FILE=${RDS_SFTP_PASSWORD_FILE:-}
+RDS_SFTP_DELETE_PASSWORD_FILE=${RDS_SFTP_DELETE_PASSWORD_FILE:-0}
 RDS_SFTP_OPTS=${RDS_SFTP_OPTS:-}
 RDS_RESUME_DOWNLOAD=${RDS_RESUME_DOWNLOAD:-1}
 RDS_SKIP_IF_DEST_EXISTS=${RDS_SKIP_IF_DEST_EXISTS:-0}
@@ -88,8 +94,21 @@ require_settings() {
     exit 1
   fi
 
-  if [[ -n $RDS_SFTP_IDENTITY_FILE && ! -f $RDS_SFTP_IDENTITY_FILE ]]; then
-    echo "RDS_SFTP_IDENTITY_FILE not found: $RDS_SFTP_IDENTITY_FILE" >&2
+  if ! [[ $RDS_SFTP_USE_PASSWORD =~ ^[01]$ ]]; then
+    echo "RDS_SFTP_USE_PASSWORD must be 0 or 1." >&2
+    exit 1
+  fi
+
+  if [[ -n $RDS_SFTP_IDENTITY_FILE && -n $RDS_SFTP_PASSWORD_FILE ]]; then
+    echo "Set only one of RDS_SFTP_IDENTITY_FILE or RDS_SFTP_PASSWORD_FILE." >&2
+    exit 1
+  fi
+
+  if ! validate_sftp_identity_file "$RDS_SFTP_IDENTITY_FILE"; then
+    exit 1
+  fi
+
+  if ! validate_sftp_password_file "$RDS_SFTP_PASSWORD_FILE"; then
     exit 1
   fi
 }
@@ -98,11 +117,110 @@ log() {
   printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
 }
 
+validate_sftp_identity_file() {
+  local identity_file="$1"
+  local identity_base=""
+  local first_line=""
+
+  [[ -n $identity_file ]] || return 0
+
+  if [[ ! -f $identity_file ]]; then
+    echo "RDS_SFTP_IDENTITY_FILE not found: $identity_file" >&2
+    return 1
+  fi
+
+  identity_base=$(basename "$identity_file")
+  case "$identity_base" in
+    known_hosts|authorized_keys|config|*.pub)
+      echo "RDS_SFTP_IDENTITY_FILE must point to an SSH private key, not: $identity_file" >&2
+      echo "Use the actual private key file under \$HOME/.ssh, not known_hosts, authorized_keys, config, or a .pub file." >&2
+      return 1
+      ;;
+  esac
+
+  if IFS= read -r first_line < "$identity_file"; then
+    case "$first_line" in
+      ssh-ed25519\ *|ssh-rsa\ *|ecdsa-sha2-nistp*\ *|sk-ssh-*\ *|sk-ecdsa-*\ *)
+        echo "RDS_SFTP_IDENTITY_FILE looks like a public key, not a private key: $identity_file" >&2
+        echo "Use the matching private key file under \$HOME/.ssh instead of the .pub file." >&2
+        return 1
+        ;;
+    esac
+  fi
+}
+
+validate_sftp_password_file() {
+  local password_file="$1"
+
+  [[ -n $password_file ]] || return 0
+
+  if [[ ! -f $password_file ]]; then
+    echo "RDS_SFTP_PASSWORD_FILE not found: $password_file" >&2
+    return 1
+  fi
+
+  if [[ ! -s $password_file ]]; then
+    echo "RDS_SFTP_PASSWORD_FILE is empty: $password_file" >&2
+    return 1
+  fi
+}
+
+default_secret_dir() {
+  local project_name="${PBS_PROJECT:-${PROJECT:-rg42}}"
+  local scratch_root=""
+
+  if [[ -n ${USER:-} ]]; then
+    scratch_root="/scratch/${project_name}/${USER}"
+    if [[ -d $scratch_root && -w $scratch_root ]]; then
+      printf '%s\n' "$scratch_root/.rds_sftp_secrets"
+      return
+    fi
+  fi
+
+  printf '%s\n' "$HOME/.rds_sftp_secrets"
+}
+
+create_password_file_from_prompt() {
+  local secret_dir=""
+  local password=""
+  local password_file=""
+
+  secret_dir="$(default_secret_dir)"
+  umask 077
+  mkdir -p "$secret_dir"
+  password_file="$(mktemp "$secret_dir/rds_sftp_password.XXXXXX")"
+  read -r -s -p 'RDS SFTP password: ' password
+  printf '\n'
+
+  if [[ -z $password ]]; then
+    rm -f "$password_file"
+    echo "RDS SFTP password cannot be empty." >&2
+    return 1
+  fi
+
+  printf '%s\n' "$password" > "$password_file"
+  chmod 600 "$password_file"
+  RDS_SFTP_PASSWORD_FILE="$password_file"
+  RDS_SFTP_DELETE_PASSWORD_FILE=1
+}
+
+cleanup_password_file() {
+  if [[ $RDS_SFTP_DELETE_PASSWORD_FILE == 1 && -n $RDS_SFTP_PASSWORD_FILE && -f $RDS_SFTP_PASSWORD_FILE ]]; then
+    rm -f "$RDS_SFTP_PASSWORD_FILE"
+  fi
+}
+
 submit_job() {
   local job_output
   local -a qsub_args
 
   require_settings
+
+  if [[ $RDS_SFTP_USE_PASSWORD == 1 && -z $RDS_SFTP_PASSWORD_FILE ]]; then
+    if ! create_password_file_from_prompt; then
+      exit 1
+    fi
+  fi
 
   mkdir -p "$DEBUG_LOG_DIR"
   if [[ -n $PBS_LOG_DIR ]]; then
@@ -112,12 +230,17 @@ submit_job() {
     qsub_args=()
   fi
 
+  trap cleanup_password_file EXIT
+
   export RDS_SRC
   export GADI_DEST
   export RDS_SFTP_USER
   export GADI_LOCAL_NAME
   export RDS_SFTP_HOST
   export RDS_SFTP_IDENTITY_FILE
+  export RDS_SFTP_USE_PASSWORD
+  export RDS_SFTP_PASSWORD_FILE
+  export RDS_SFTP_DELETE_PASSWORD_FILE
   export RDS_SFTP_OPTS
   export RDS_RESUME_DOWNLOAD
   export RDS_SKIP_IF_DEST_EXISTS
@@ -125,6 +248,7 @@ submit_job() {
   export PBS_LOG_DIR
 
   job_output=$(qsub -V "${qsub_args[@]}" "$script_path")
+  trap - EXIT
   printf 'Submitted PBS job %s for RDS restore\n' "${job_output%%.*}"
   printf 'RDS source: %s\n' "$RDS_SRC"
   printf 'Gadi destination parent: %s\n' "$GADI_DEST"
@@ -151,19 +275,98 @@ run_sftp() {
     sftp_opts_array=()
   fi
 
-  if [[ -n $RDS_SFTP_IDENTITY_FILE ]]; then
-    sftp_opts_array+=(-o IdentitiesOnly=yes -i "$RDS_SFTP_IDENTITY_FILE")
-  fi
+  if [[ -n $RDS_SFTP_PASSWORD_FILE ]]; then
+    expect -c '
+      set timeout -1
+      match_max 1048576
+      set commands_file [lindex $argv 0]
+      set password_file [lindex $argv 1]
+      set user_host [lindex $argv 2]
+      set sftp_args [lrange $argv 3 end]
+      set pw_fd [open $password_file r]
+      set password [string trimright [read $pw_fd] "\r\n"]
+      close $pw_fd
+      set sent_commands 0
+      log_user 1
+      spawn sftp {*}$sftp_args $user_host
+      expect {
+        -re "(?i)are you sure you want to continue connecting.*" {
+          send -- "yes\r"
+          exp_continue
+        }
+        -re "(?i)password:" {
+          send -- "$password\r"
+          exp_continue
+        }
+        -re {sftp>} {
+          if {!$sent_commands} {
+            set cmd_fd [open $commands_file r]
+            while {[gets $cmd_fd line] >= 0} {
+              send -- "$line\r"
+            }
+            close $cmd_fd
+            set sent_commands 1
+          }
+          exp_continue
+        }
+        eof
+      }
+      lassign [wait] pid spawn_id os_error status
+      exit $status
+    ' "$commands_file" "$RDS_SFTP_PASSWORD_FILE" "${RDS_SFTP_USER}@${RDS_SFTP_HOST}" "${sftp_opts_array[@]}" > "$output_file" 2> "$error_file"
+  else
+    if [[ -n $RDS_SFTP_IDENTITY_FILE ]]; then
+      sftp_opts_array+=(-o IdentitiesOnly=yes -i "$RDS_SFTP_IDENTITY_FILE")
+    fi
 
-  sftp "${sftp_opts_array[@]}" "${RDS_SFTP_USER}@${RDS_SFTP_HOST}" < "$commands_file" > "$output_file" 2> "$error_file"
+    sftp "${sftp_opts_array[@]}" "${RDS_SFTP_USER}@${RDS_SFTP_HOST}" < "$commands_file" > "$output_file" 2> "$error_file"
+  fi
+}
+
+sftp_error_log_file() {
+  if [[ -n $RDS_SFTP_PASSWORD_FILE ]]; then
+    printf '%s\n' "$1"
+  else
+    printf '%s\n' "$2"
+  fi
 }
 
 show_sftp_auth_hint() {
   cat >&2 <<EOF
 SFTP disconnected after too many authentication failures.
 If your SSH agent is offering several keys, export RDS_SFTP_IDENTITY_FILE to the
-single private key that should be used, then resubmit the helper. Example:
+single private key that should be used, then resubmit the helper.
+If you prefer password auth, set RDS_SFTP_USE_PASSWORD=1 before running the
+helper. Example:
   export RDS_SFTP_IDENTITY_FILE=\$HOME/.ssh/<your_private_key>
+EOF
+}
+
+show_sftp_password_hint() {
+  cat >&2 <<EOF
+SFTP password auth is available for this helper.
+From a login shell, set:
+  export RDS_SFTP_USE_PASSWORD=1
+Then rerun ./scripts/copy_RDS_to_GADI.sh ...
+EOF
+}
+
+show_sftp_invalid_identity_hint() {
+  cat >&2 <<EOF
+RDS_SFTP_IDENTITY_FILE is not a usable SSH private key.
+Use the private key itself, not known_hosts, authorized_keys, config, or a .pub
+file. Check what you have with:
+  ls -la \$HOME/.ssh
+Then export the real private key path and resubmit the helper.
+EOF
+}
+
+show_sftp_invalid_password_hint() {
+  cat >&2 <<EOF
+RDS_SFTP_PASSWORD_FILE is missing or empty.
+If you want password auth, resubmit from a login shell with:
+  export RDS_SFTP_USE_PASSWORD=1
+  ./scripts/copy_RDS_to_GADI.sh ...
 EOF
 }
 
@@ -185,6 +388,7 @@ remote_path_is_directory() {
   local commands_file="$tmpdir/check_remote_dir.sftp"
   local output_file="$tmpdir/check_remote_dir.out"
   local error_file="$tmpdir/check_remote_dir.err"
+  local path_check_log=""
 
   printf 'cd "%s"\npwd\nbye\n' "$(sftp_quote "$remote_path")" > "$commands_file"
 
@@ -192,7 +396,8 @@ remote_path_is_directory() {
     return 1
   fi
 
-  if has_sftp_path_error "$error_file"; then
+  path_check_log="$(sftp_error_log_file "$output_file" "$error_file")"
+  if has_sftp_path_error "$path_check_log"; then
     return 1
   fi
 
@@ -209,6 +414,7 @@ remote_path_is_file() {
   local output_file="$tmpdir/check_remote_file.out"
   local error_file="$tmpdir/check_remote_file.err"
   local remote_listing=""
+  local path_check_log=""
 
   printf 'ls -l "%s"\nbye\n' "$(sftp_quote "$remote_path")" > "$commands_file"
 
@@ -216,7 +422,8 @@ remote_path_is_file() {
     return 1
   fi
 
-  if has_sftp_path_error "$error_file"; then
+  path_check_log="$(sftp_error_log_file "$output_file" "$error_file")"
+  if has_sftp_path_error "$path_check_log"; then
     return 1
   fi
 
@@ -228,6 +435,7 @@ run_transfer() {
   local debug_stamp debug_run_log
   local rds_src_trimmed default_local_name local_name local_target
   local remote_type download_commands download_output download_error info_file
+  local auth_error_log=""
 
   require_settings
 
@@ -237,6 +445,11 @@ run_transfer() {
       exit 1
     fi
   done
+
+  if [[ -n $RDS_SFTP_PASSWORD_FILE ]] && ! command -v expect >/dev/null 2>&1; then
+    echo "Password auth requires expect, but it was not found in PATH." >&2
+    exit 1
+  fi
 
   mkdir -p "$DEBUG_LOG_DIR"
   debug_stamp=${PBS_JOBID:-manual}.$(date '+%Y%m%d_%H%M%S')
@@ -250,13 +463,17 @@ run_transfer() {
   log "  RDS_SRC=$RDS_SRC"
   log "  GADI_DEST=$GADI_DEST"
   log "  RDS_SFTP_USER=$RDS_SFTP_USER"
-  log "  RDS_SFTP_IDENTITY_FILE=${RDS_SFTP_IDENTITY_FILE:-<default ssh selection>}"
+  if [[ -n $RDS_SFTP_PASSWORD_FILE ]]; then
+    log "  SFTP auth mode=password file"
+  else
+    log "  RDS_SFTP_IDENTITY_FILE=${RDS_SFTP_IDENTITY_FILE:-<default ssh selection>}"
+  fi
   log "  GADI_LOCAL_NAME=${GADI_LOCAL_NAME:-<source basename>}"
   log "  RDS_RESUME_DOWNLOAD=$RDS_RESUME_DOWNLOAD"
   log "  RDS_SKIP_IF_DEST_EXISTS=$RDS_SKIP_IF_DEST_EXISTS"
 
   tmpdir="$(mktemp -d)"
-  trap 'rm -rf "$tmpdir"' EXIT
+  trap 'rm -rf "$tmpdir"; cleanup_password_file' EXIT
 
   rds_src_trimmed="${RDS_SRC%/}"
   if [[ -z $rds_src_trimmed ]]; then
@@ -343,9 +560,18 @@ run_transfer() {
   log "RDS SFTP user: $RDS_SFTP_USER"
 
   if ! run_sftp "$download_commands" "$download_output" "$download_error"; then
-    cat "$download_error" >&2
-    if grep -Fqi 'Too many authentication failures' "$download_error"; then
+    auth_error_log="$(sftp_error_log_file "$download_output" "$download_error")"
+    if [[ -s $auth_error_log ]]; then
+      cat "$auth_error_log" >&2
+    fi
+    if grep -Fqi 'invalid format' "$auth_error_log"; then
+      show_sftp_invalid_identity_hint
+    elif grep -Fqi 'Too many authentication failures' "$auth_error_log"; then
       show_sftp_auth_hint
+    elif grep -Fqi 'Permission denied' "$auth_error_log"; then
+      show_sftp_password_hint
+    elif [[ -n $RDS_SFTP_PASSWORD_FILE ]]; then
+      show_sftp_invalid_password_hint
     fi
     exit 1
   fi

@@ -17,6 +17,8 @@ Optional environment variables:
   RDS_SFTP_USER        Required RDS username for sftp login
   RDS_SFTP_IDENTITY_FILE Optional SSH private key file for sftp; when set the
                         helper adds `-i <file> -o IdentitiesOnly=yes`
+  RDS_SFTP_PASSWORD_FILE Optional file containing the SFTP password; when set
+                        the helper uses expect-driven password auth
   RDS_SFTP_OPTS        Extra options passed to sftp, for example: -v
   RDS_SFTP_CHUNK_SIZE  Number of files per SFTP session, default: 100
   RDS_UPLOAD_MANIFEST  Persistent uploaded-files manifest path
@@ -42,6 +44,7 @@ dest=${2:-${RDS_DEST:-}}
 host=${RDS_SFTP_HOST:-research-data-ext.sydney.edu.au}
 user=${RDS_SFTP_USER:-}
 sftp_identity_file=${RDS_SFTP_IDENTITY_FILE:-}
+sftp_password_file=${RDS_SFTP_PASSWORD_FILE:-}
 sftp_opts=${RDS_SFTP_OPTS:-}
 chunk_size=${RDS_SFTP_CHUNK_SIZE:-100}
 manifest_path=${RDS_UPLOAD_MANIFEST:-}
@@ -89,8 +92,8 @@ if ! [[ $chunk_size =~ ^[0-9]+$ ]] || [[ $chunk_size -lt 1 ]]; then
   exit 1
 fi
 
-if [[ -n $sftp_identity_file && ! -f $sftp_identity_file ]]; then
-  echo "RDS_SFTP_IDENTITY_FILE not found: $sftp_identity_file" >&2
+if [[ -n $sftp_identity_file && -n $sftp_password_file ]]; then
+  echo "Set only one of RDS_SFTP_IDENTITY_FILE or RDS_SFTP_PASSWORD_FILE." >&2
   exit 1
 fi
 
@@ -106,9 +109,70 @@ for cmd in find sftp basename dirname sort awk sed comm wc mktemp cp mv tr touch
   fi
 done
 
+if [[ -n $sftp_password_file ]] && ! command -v expect >/dev/null 2>&1; then
+  echo "Password auth requires expect, but it was not found in PATH." >&2
+  exit 1
+fi
+
 log() {
   printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
 }
+
+validate_sftp_identity_file() {
+  local identity_file="$1"
+  local identity_base=""
+  local first_line=""
+
+  [[ -n $identity_file ]] || return 0
+
+  if [[ ! -f $identity_file ]]; then
+    echo "RDS_SFTP_IDENTITY_FILE not found: $identity_file" >&2
+    return 1
+  fi
+
+  identity_base=$(basename "$identity_file")
+  case "$identity_base" in
+    known_hosts|authorized_keys|config|*.pub)
+      echo "RDS_SFTP_IDENTITY_FILE must point to an SSH private key, not: $identity_file" >&2
+      echo "Use the actual private key file under \$HOME/.ssh, not known_hosts, authorized_keys, config, or a .pub file." >&2
+      return 1
+      ;;
+  esac
+
+  if IFS= read -r first_line < "$identity_file"; then
+    case "$first_line" in
+      ssh-ed25519\ *|ssh-rsa\ *|ecdsa-sha2-nistp*\ *|sk-ssh-*\ *|sk-ecdsa-*\ *)
+        echo "RDS_SFTP_IDENTITY_FILE looks like a public key, not a private key: $identity_file" >&2
+        echo "Use the matching private key file under \$HOME/.ssh instead of the .pub file." >&2
+        return 1
+        ;;
+    esac
+  fi
+}
+
+validate_sftp_password_file() {
+  local password_file="$1"
+
+  [[ -n $password_file ]] || return 0
+
+  if [[ ! -f $password_file ]]; then
+    echo "RDS_SFTP_PASSWORD_FILE not found: $password_file" >&2
+    return 1
+  fi
+
+  if [[ ! -s $password_file ]]; then
+    echo "RDS_SFTP_PASSWORD_FILE is empty: $password_file" >&2
+    return 1
+  fi
+}
+
+if ! validate_sftp_identity_file "$sftp_identity_file"; then
+  exit 1
+fi
+
+if ! validate_sftp_password_file "$sftp_password_file"; then
+  exit 1
+fi
 
 default_manifest_dir() {
   local scratch_root=""
@@ -177,14 +241,59 @@ run_sftp() {
     sftp_opts_array=()
   fi
 
-  if [[ -n $sftp_identity_file ]]; then
-    sftp_opts_array+=(-o IdentitiesOnly=yes -i "$sftp_identity_file")
-  fi
-
-  if sftp "${sftp_opts_array[@]}" "$user@$host" < "$commands_file" > "$stdout_file" 2> "$stderr_file"; then
-    sftp_status=0
+  if [[ -n $sftp_password_file ]]; then
+    if expect -c '
+      set timeout -1
+      match_max 1048576
+      set commands_file [lindex $argv 0]
+      set password_file [lindex $argv 1]
+      set user_host [lindex $argv 2]
+      set sftp_args [lrange $argv 3 end]
+      set pw_fd [open $password_file r]
+      set password [string trimright [read $pw_fd] "\r\n"]
+      close $pw_fd
+      set sent_commands 0
+      log_user 1
+      spawn sftp {*}$sftp_args $user_host
+      expect {
+        -re "(?i)are you sure you want to continue connecting.*" {
+          send -- "yes\r"
+          exp_continue
+        }
+        -re "(?i)password:" {
+          send -- "$password\r"
+          exp_continue
+        }
+        -re {sftp>} {
+          if {!$sent_commands} {
+            set cmd_fd [open $commands_file r]
+            while {[gets $cmd_fd line] >= 0} {
+              send -- "$line\r"
+            }
+            close $cmd_fd
+            set sent_commands 1
+          }
+          exp_continue
+        }
+        eof
+      }
+      lassign [wait] pid spawn_id os_error status
+      exit $status
+    ' "$commands_file" "$sftp_password_file" "$user@$host" "${sftp_opts_array[@]}" > "$stdout_file" 2> "$stderr_file"; then
+      sftp_status=0
+    else
+      sftp_status=$?
+    fi
   else
-    sftp_status=$?
+    if [[ -n $sftp_identity_file ]]; then
+      sftp_opts_array+=(-o IdentitiesOnly=yes -i "$sftp_identity_file")
+    fi
+
+    if sftp "${sftp_opts_array[@]}" "$user@$host" < "$commands_file" > "$stdout_file" 2> "$stderr_file"; then
+      sftp_status=0
+    else
+      sftp_status=$?
+    fi
   fi
 
   if [[ -s $stdout_file ]]; then
@@ -197,12 +306,49 @@ run_sftp() {
   return "$sftp_status"
 }
 
+sftp_error_log_file() {
+  if [[ -n $sftp_password_file ]]; then
+    printf '%s\n' "$tmpdir/last_sftp.stdout"
+  else
+    printf '%s\n' "$tmpdir/last_sftp.stderr"
+  fi
+}
+
 show_sftp_auth_hint() {
   cat >&2 <<EOF
 SFTP disconnected after too many authentication failures.
 If your SSH agent is offering several keys, export RDS_SFTP_IDENTITY_FILE to the
-single private key that should be used, then resubmit with qsub -V. Example:
+single private key that should be used, then resubmit with qsub -V.
+If you prefer password auth, submit through the password helper and set
+RDS_SFTP_USE_PASSWORD=1. Example:
   export RDS_SFTP_IDENTITY_FILE=\$HOME/.ssh/<your_private_key>
+EOF
+}
+
+show_sftp_password_hint() {
+  cat >&2 <<EOF
+SFTP password auth is available for this helper.
+From a login shell, set RDS_SFTP_USE_PASSWORD=1 and submit via:
+  ./scripts/submit_transfer_gadi_to_rds.sh
+EOF
+}
+
+show_sftp_invalid_identity_hint() {
+  cat >&2 <<EOF
+RDS_SFTP_IDENTITY_FILE is not a usable SSH private key.
+Use the private key itself, not known_hosts, authorized_keys, config, or a .pub
+file. Check what you have with:
+  ls -la \$HOME/.ssh
+Then export the real private key path and resubmit with qsub -V.
+EOF
+}
+
+show_sftp_invalid_password_hint() {
+  cat >&2 <<EOF
+RDS_SFTP_PASSWORD_FILE is missing or empty.
+If you want password auth, resubmit from a login shell with:
+  export RDS_SFTP_USE_PASSWORD=1
+  ./scripts/submit_transfer_gadi_to_rds.sh
 EOF
 }
 
@@ -463,7 +609,11 @@ log "Files queued for upload: $total_files_queued"
 log "Transfer info file: $info_file"
 log "SFTP chunk size: $chunk_size"
 log "Upload manifest: $manifest_path"
-log "RDS SFTP identity file: ${sftp_identity_file:-<default ssh selection>}"
+if [[ -n $sftp_password_file ]]; then
+  log "SFTP auth mode: password file"
+else
+  log "RDS SFTP identity file: ${sftp_identity_file:-<default ssh selection>}"
+fi
 log "Prioritize uploads: $prioritize_uploads"
 if [[ $ignore_manifest == 1 ]]; then
   log "Manifest handling: ignored for this run; all eligible local files will be queued"
@@ -548,10 +698,21 @@ total_chunk_count=$((total_chunk_count + 1))
 
 log "Uploading files to RDS via SFTP in $total_chunk_count chunk(s)"
 for chunk_file in "$tmpdir"/upload_*.sftp; do
+  auth_error_log="$(sftp_error_log_file)"
   log "Running $(basename "$chunk_file")"
   if ! run_sftp "$chunk_file"; then
-    if [[ -s $tmpdir/last_sftp.stderr ]] && grep -Fqi 'Too many authentication failures' "$tmpdir/last_sftp.stderr"; then
-      show_sftp_auth_hint
+    if [[ -s $auth_error_log ]]; then
+      if grep -Fqi 'invalid format' "$auth_error_log"; then
+        show_sftp_invalid_identity_hint
+      elif grep -Fqi 'Too many authentication failures' "$auth_error_log"; then
+        show_sftp_auth_hint
+      elif grep -Fqi 'Permission denied' "$auth_error_log"; then
+        show_sftp_password_hint
+      elif [[ -n $sftp_password_file ]]; then
+        show_sftp_invalid_password_hint
+      fi
+    elif [[ -n $sftp_password_file ]]; then
+      show_sftp_invalid_password_hint
     fi
     exit 1
   fi

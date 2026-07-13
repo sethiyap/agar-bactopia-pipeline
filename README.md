@@ -100,12 +100,29 @@ RDS_SFTP_USER=<your_rds_username> \
 This helper submits a PBS job. It does not run the transfer interactively in
 your login shell.
 
+If you prefer password auth instead of SSH keys, run:
+
+```bash
+cd /home/562/<nci_username>
+
+RDS_SFTP_USER=<your_rds_username> \
+RDS_SFTP_USE_PASSWORD=1 \
+/g/data/rg42/agar-bactopia-pipeline/scripts/copy_RDS_to_GADI.sh \
+  /rds/PRJ-AGAR/PRJ-AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
+  /scratch/rg42/AGAR/raw_data/2025/B07
+```
+
+This prompts once on the login node, stores the password in a temporary file,
+and removes that file after the PBS job finishes.
+
 Useful notes:
 
 - `RDS_SRC` can be a file or a directory
 - `GADI_DEST` is the destination parent directory on Gadi
 - set `GADI_LOCAL_NAME` if you want a different name on Gadi
 - if the RDS server disconnects with `Too many authentication failures`, set `RDS_SFTP_IDENTITY_FILE=$HOME/.ssh/<your_key>` so the helper uses only that key
+- `RDS_SFTP_IDENTITY_FILE` must be the private key itself, not `known_hosts`, `authorized_keys`, `config`, or a `.pub` file
+- set `RDS_SFTP_USE_PASSWORD=1` if you want the helper to prompt once for the password before qsub
 - set `RDS_RESUME_DOWNLOAD=1` to resume partial downloads
 - set `RDS_SKIP_IF_DEST_EXISTS=1` to skip work when the final target already exists
 - set `DEBUG_LOG_DIR=/scratch/rg42/${USER}/transfer_logs` if you want the detailed transfer log in a known place
@@ -337,6 +354,19 @@ mkdir -p "$DEBUG_LOG_DIR" "$RDS_UPLOAD_MANIFEST_DIR"
 qsub -V /g/data/rg42/agar-bactopia-pipeline/scripts/jobsubmission_transfer_gadi_to_rds.pbs
 ```
 
+Or use password auth from a login shell:
+
+```bash
+export SRC_PATH=/scratch/rg42/AGAR/intermediates/2025/B07
+export RDS_DEST=/rds/PRJ-AGAR/PRJ-AGAR/intermediates/2025/B07
+export RDS_SFTP_USER=<your_rds_username>
+export RDS_SFTP_USE_PASSWORD=1
+export DEBUG_LOG_DIR=/scratch/rg42/${USER}/transfer_logs
+export RDS_UPLOAD_MANIFEST_DIR=/scratch/rg42/${USER}/.rds_transfer_manifests
+mkdir -p "$DEBUG_LOG_DIR" "$RDS_UPLOAD_MANIFEST_DIR"
+/g/data/rg42/agar-bactopia-pipeline/scripts/submit_transfer_gadi_to_rds.sh
+```
+
 Copy only the main deliverables first:
 
 ```bash
@@ -359,7 +389,9 @@ Transfer notes:
 
 - `RDS_SFTP_USER` is required for uploads
 - if the upload log shows `Too many authentication failures`, set `RDS_SFTP_IDENTITY_FILE=$HOME/.ssh/<your_key>` before `qsub -V`
-- passwords are not stored in the script
+- `RDS_SFTP_IDENTITY_FILE` must point to the SSH private key itself, not `known_hosts`, `authorized_keys`, `config`, or a `.pub` file
+- set `RDS_SFTP_USE_PASSWORD=1` and submit through `scripts/submit_transfer_gadi_to_rds.sh` if you prefer a password prompt
+- passwords are not hardcoded in the script; password mode uses a temporary file that is deleted after the job completes
 - the wrapper defaults to scratch-backed debug and manifest locations if you do not override them
 - by default, `_work` and `.nextflow.log*` are excluded from upload
 

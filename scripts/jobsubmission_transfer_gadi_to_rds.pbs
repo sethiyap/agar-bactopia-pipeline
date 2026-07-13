@@ -15,6 +15,9 @@
 #   export RDS_SFTP_USER=<your_rds_username>
 #   # Optional when the RDS server reports "Too many authentication failures":
 #   # export RDS_SFTP_IDENTITY_FILE=$HOME/.ssh/<your_private_key>
+#   # Optional password mode from a login shell:
+#   # export RDS_SFTP_USE_PASSWORD=1
+#   # ./scripts/submit_transfer_gadi_to_rds.sh
 #   export TRANSFER_SCRIPT=/g/data/rg42/agar-bactopia-pipeline/scripts/transfer_gadi_to_rds.sh
 #   export DEBUG_LOG_DIR=/scratch/rg42/${USER}/transfer_logs
 #   export RDS_UPLOAD_MANIFEST_DIR=/scratch/rg42/${USER}/.rds_transfer_manifests
@@ -37,6 +40,8 @@ SRC_PATH=${SRC_PATH:-}
 RDS_DEST=${RDS_DEST:-}
 RDS_SFTP_USER=${RDS_SFTP_USER:-}
 RDS_SFTP_IDENTITY_FILE=${RDS_SFTP_IDENTITY_FILE:-}
+RDS_SFTP_PASSWORD_FILE=${RDS_SFTP_PASSWORD_FILE:-}
+RDS_SFTP_DELETE_PASSWORD_FILE=${RDS_SFTP_DELETE_PASSWORD_FILE:-0}
 RDS_SFTP_OPTS=${RDS_SFTP_OPTS:-}
 RDS_SFTP_CHUNK_SIZE=${RDS_SFTP_CHUNK_SIZE:-2000}
 RDS_IGNORE_MANIFEST=${RDS_IGNORE_MANIFEST:-0}
@@ -123,7 +128,11 @@ echo "  KEEP_DEBUG_LOG=$KEEP_DEBUG_LOG"
 echo "  SRC_PATH=$SRC_PATH"
 echo "  RDS_DEST=$RDS_DEST"
 echo "  RDS_SFTP_USER=$RDS_SFTP_USER"
-echo "  RDS_SFTP_IDENTITY_FILE=${RDS_SFTP_IDENTITY_FILE:-<default ssh selection>}"
+if [[ -n $RDS_SFTP_PASSWORD_FILE ]]; then
+  echo "  SFTP_AUTH_MODE=password file"
+else
+  echo "  RDS_SFTP_IDENTITY_FILE=${RDS_SFTP_IDENTITY_FILE:-<default ssh selection>}"
+fi
 echo "  RDS_SFTP_CHUNK_SIZE=$RDS_SFTP_CHUNK_SIZE"
 echo "  RDS_IGNORE_MANIFEST=$RDS_IGNORE_MANIFEST"
 echo "  RDS_PRIORITIZE_UPLOADS=$RDS_PRIORITIZE_UPLOADS"
@@ -142,6 +151,7 @@ set +e
 RDS_UPLOAD_MANIFEST_DIR="$RDS_UPLOAD_MANIFEST_DIR" \
 RDS_SFTP_USER="$RDS_SFTP_USER" \
 RDS_SFTP_IDENTITY_FILE="$RDS_SFTP_IDENTITY_FILE" \
+RDS_SFTP_PASSWORD_FILE="$RDS_SFTP_PASSWORD_FILE" \
 RDS_SFTP_OPTS="$RDS_SFTP_OPTS" \
 RDS_SFTP_CHUNK_SIZE="$RDS_SFTP_CHUNK_SIZE" \
 RDS_IGNORE_MANIFEST="$RDS_IGNORE_MANIFEST" \
@@ -154,6 +164,11 @@ RDS_COPY_SINCE="$RDS_COPY_SINCE" \
   bash -x "$TRANSFER_SCRIPT" "$SRC_PATH" "$RDS_DEST" >"$DEBUG_RUN_LOG" 2>&1
 transfer_exit_code=$?
 set -e
+
+if [[ $RDS_SFTP_DELETE_PASSWORD_FILE == 1 && -n $RDS_SFTP_PASSWORD_FILE && -f $RDS_SFTP_PASSWORD_FILE ]]; then
+  rm -f "$RDS_SFTP_PASSWORD_FILE"
+  echo "Removed temporary password file"
+fi
 
 echo "Transfer helper exit code: $transfer_exit_code"
 echo "Transfer helper log: $DEBUG_RUN_LOG"

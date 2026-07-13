@@ -7,9 +7,11 @@ usage() {
 Usage:
   ./bin/agar-bactopia submit gadi RAW_FASTQ_DIR METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
   ./bin/agar-bactopia submit gadi --additional-tools yes RAW_FASTQ_DIR METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
+  ./bin/agar-bactopia submit gadi --dry-run RAW_FASTQ_DIR METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
   ./bin/agar-bactopia submit gadi --is-agar-project 0 RAW_FASTQ_DIR METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
   ./bin/agar-bactopia submit gadi --mail-user you@example.org [--mail-options ae] RAW_FASTQ_DIR METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
   ./bin/agar-bactopia submit slurm RAW_FASTQ_DIR METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
+  ./bin/agar-bactopia submit slurm --dry-run RAW_FASTQ_DIR METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
   ./bin/agar-bactopia submit slurm --site-config config/sites/slurm.local.env RAW_FASTQ_DIR METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
 EOF
 }

@@ -198,6 +198,7 @@ Command shape:
 Main public options:
 
 - `--additional-tools yes|no`: turn the extra tool bundle on or off
+- `--dry-run`: validate config, inputs, and dependencies without submitting jobs
 - `--is-agar-project auto|1|0`: control AGAR-specific normalization and filtering
 - `--site-config /path/to/gadi.local.env`: use a different site config file
 - `--mail-user you@example.org`: override `PBS_MAIL_USER` for one submission
@@ -233,7 +234,67 @@ After you submit, the launcher usually does the following in order:
 If you also turn on ST131Typer, that runs later in the chain after the core
 workflow has finished.
 
-### 7. Copy Finished Results Back To RDS
+### 7. Expected Output Structure
+
+After a normal run, the main outputs live under `RESULTS_ROOT`.
+
+Example for:
+
+- `RESULTS_ROOT=/scratch/rg42/AGAR/intermediates/2025/B07`
+- metadata file `B07_samplesheet.txt`
+
+Typical structure:
+
+```text
+/scratch/rg42/AGAR/intermediates/2025/B07/
+├── submit_agar_full_pipeline_YYYYMMDD_HHMMSS.log
+├── batch_bactopia_001/
+├── batch_bactopia_001_tools/
+├── batch_bactopia_001_kleborate/
+├── batch_bactopia_001_fimtyper/              # only if FimTyper is enabled
+├── batch_bactopia_002/
+├── batch_bactopia_002_tools/
+├── batch_bactopia_consolidated/
+│   ├── project_summary.tsv
+│   ├── tool_processing_log.tsv
+│   ├── results_main/
+│   └── tools/
+├── B07_samplesheet_with_results.tsv
+├── B07_samplesheet_with_results_review_required.tsv
+├── B07_samplesheet_with_results_mlst_reviewed.tsv   # present when MLST review runs
+├── B07_samplesheet_with_results_post_review.tsv     # only if RUN_POST_REVIEW_MAP=1
+├── mlst_review_standalone/                          # present when MLST review runs
+│   ├── mlst_review.tsv
+│   ├── mlst_review_missing.tsv
+│   └── mlst_review_raw.log
+├── B07_results.xlsx                                 # present when workbook export runs
+├── B07_assemblies/                                  # present when assembly collection runs
+└── B07_st131typer/                                  # present when ST131Typer runs
+```
+
+Notes:
+
+- the first file to check is usually `submit_agar_full_pipeline_*.log`
+- the final reviewed TSV is usually `B07_samplesheet_with_results_mlst_reviewed.tsv` when MLST review is enabled
+- if that reviewed TSV is not present, use `B07_samplesheet_with_results.tsv`
+- `B07_results.xlsx` is the default workbook name because it uses `basename(RESULTS_ROOT)`
+- `B07_assemblies/` and `B07_st131typer/` are optional post-processing outputs
+
+Batch shard files are created under `METADATA_DIR`, not under `RESULTS_ROOT`.
+
+Example:
+
+```text
+/scratch/rg42/AGAR/metadata/2025/B07/
+├── B07_samplesheet.txt
+├── samplesheet.fofn
+└── batches/
+    ├── batch_bactopia_001.fofn
+    ├── batch_bactopia_002.fofn
+    └── ...
+```
+
+### 8. Copy Finished Results Back To RDS
 
 After the run finishes on Gadi, use the packaged upload helper. The recommended
 pattern is `export ...` followed by `qsub -V`.
@@ -279,6 +340,23 @@ Transfer notes:
 ## Common Variations
 
 These are the most common changes to the standard submission command.
+
+### Validate The Installation Before Submitting
+
+Use `--dry-run` to check the current config, metadata, FOFN handling, and key
+dependencies without submitting any scheduler jobs.
+
+```bash
+/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
+  --dry-run \
+  /scratch/rg42/AGAR/raw_data/2025/B07/AGRF_CAGRF26050180_AAHJ2FTM5 \
+  /scratch/rg42/AGAR/metadata/2025/B07 \
+  /scratch/rg42/AGAR/intermediates/2025/B07 \
+  50
+```
+
+This mode checks the submission path and exits before the actual pipeline
+starts.
 
 ### Turn On The Additional Tools Bundle
 
@@ -642,6 +720,7 @@ Optional Slurm settings include:
 The public options are the same as the Gadi backend:
 
 - `--additional-tools`
+- `--dry-run`
 - `--is-agar-project`
 - `--site-config`
 - `--mail-user`

@@ -7,11 +7,13 @@ usage() {
 Usage:
   ./wrappers/submit.slurm.sh RAW_FASTQ_DIR METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
   ./wrappers/submit.slurm.sh --additional-tools yes RAW_FASTQ_DIR METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
+  ./wrappers/submit.slurm.sh --dry-run RAW_FASTQ_DIR METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
   ./wrappers/submit.slurm.sh --is-agar-project 0 RAW_FASTQ_DIR METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
   ./wrappers/submit.slurm.sh --site-config config/sites/slurm.local.env RAW_FASTQ_DIR METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
   ./wrappers/submit.slurm.sh --mail-user you@example.org [--mail-options ae] RAW_FASTQ_DIR METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
 
 Options:
+  --dry-run                    Validate config, inputs, and dependencies without submitting jobs
   --is-agar-project auto|1|0   Override AGAR auto-detection for mixed or non-AGAR inputs
 EOF
 }
@@ -23,6 +25,7 @@ additional_tools_override=
 is_agar_project_override=
 mail_user_override=
 mail_options_override=
+dry_run=0
 
 while [[ $# -gt 0 ]]; do
   case "${1:-}" in
@@ -45,6 +48,10 @@ while [[ $# -gt 0 ]]; do
     --mail-options)
       mail_options_override=$2
       shift 2
+      ;;
+    --dry-run)
+      dry_run=1
+      shift
       ;;
     --help|-h)
       usage
@@ -121,5 +128,10 @@ export SCHEDULER_BACKEND=slurm
 export RUN_AGAR_DIR=$project_root
 batch_size=${4:-${BATCH_SIZE_DEFAULT:-50}}
 
-exec "$project_root/scripts/submit_agar_full_pipeline.sh" --config "$site_config" \
-  "$1" "$2" "$3" "$batch_size"
+cmd=("$project_root/scripts/submit_agar_full_pipeline.sh" --config "$site_config")
+if [[ $dry_run == 1 ]]; then
+  cmd+=(--dry-run)
+fi
+cmd+=("$1" "$2" "$3" "$batch_size")
+
+exec "${cmd[@]}"

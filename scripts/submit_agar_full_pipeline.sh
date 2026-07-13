@@ -7,6 +7,7 @@ usage() {
 Usage:
   ./scripts/submit_agar_full_pipeline.sh RAW_FASTQ_DIR METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
   ./scripts/submit_agar_full_pipeline.sh --config scripts/gadi_pipeline.env RAW_FASTQ_DIR METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
+  ./scripts/submit_agar_full_pipeline.sh --dry-run RAW_FASTQ_DIR METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
 
 Example:
   ./scripts/submit_agar_full_pipeline.sh \
@@ -37,6 +38,9 @@ Inputs:
 
 Environment variables:
   PIPELINE_CONFIG        Optional shell env file to source before resolving defaults
+  DRY_RUN               Optional validation mode. Use --dry-run or DRY_RUN=1 to
+                        check inputs, config, and dependencies without
+                        submitting jobs
   RUN_AGAR_DIR           Default: directory above this script
   SAMPLESHEET_PATH       Default: <METADATA_DIR>/samplesheet.fofn
   AGRF_SHEET_PATH        Optional explicit metadata sheet path. Default: first <METADATA_DIR>/*_samplesheet.txt match
@@ -110,6 +114,7 @@ script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 source "$script_dir/lib_scheduler.sh"
 
 pipeline_config=${PIPELINE_CONFIG:-}
+dry_run=${DRY_RUN:-0}
 
 while [[ $# -gt 0 ]]; do
   case "${1:-}" in
@@ -121,6 +126,10 @@ while [[ $# -gt 0 ]]; do
       fi
       pipeline_config=$2
       shift 2
+      ;;
+    --dry-run)
+      dry_run=1
+      shift
       ;;
     --help|-h)
       usage
@@ -194,6 +203,7 @@ else
 fi
 
 submit_script=${SUBMIT_PIPELINE_SCRIPT:-$script_dir/submit_bactopia_batch_pipeline.sh}
+split_script=${SPLIT_SAMPLESHEET_SCRIPT:-$script_dir/split_bactopia_samplesheet.sh}
 normalize_script=${NORMALIZE_SCRIPT:-$script_dir/normalize_agar_fastq_sample_names.sh}
 validate_script=${VALIDATE_FOFN_SCRIPT:-$script_dir/validate_bactopia_fofn.sh}
 consolidate_pbs_script=${CONSOLIDATE_PBS_SCRIPT:-$script_dir/run_consolidate_batches.pbs}
@@ -276,6 +286,20 @@ resolve_is_agar_project() {
   return 1
 }
 
+tools_string_contains() {
+  local tool_name=$1
+  shift
+  local tool
+
+  for tool in "$@"; do
+    if [[ $tool == "$tool_name" ]]; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
 find_metadata_sheet() {
   local dir=$1
   local matches=()
@@ -332,6 +356,296 @@ extract_scratch_project() {
   if [[ $path =~ ^/scratch/([^/]+)/ ]]; then
     printf '%s\n' "${BASH_REMATCH[1]}"
   fi
+}
+
+dry_run_failures=0
+dry_run_warnings=0
+
+dry_run_pass() {
+  log "INFO" "DRY RUN PASS: $1"
+}
+
+dry_run_warn() {
+  dry_run_warnings=$((dry_run_warnings + 1))
+  log "WARN" "DRY RUN WARN: $1"
+}
+
+dry_run_fail() {
+  dry_run_failures=$((dry_run_failures + 1))
+  log "ERROR" "DRY RUN FAIL: $1"
+}
+
+dry_run_check_file() {
+  local label=$1
+  local path=$2
+
+  if [[ -f $path ]]; then
+    dry_run_pass "$label found: $path"
+  else
+    dry_run_fail "$label not found: $path"
+  fi
+}
+
+dry_run_check_dir() {
+  local label=$1
+  local path=$2
+
+  if [[ -d $path ]]; then
+    dry_run_pass "$label found: $path"
+  else
+    dry_run_fail "$label not found: $path"
+  fi
+}
+
+dry_run_check_path() {
+  local label=$1
+  local path=$2
+
+  if [[ -e $path ]]; then
+    dry_run_pass "$label found: $path"
+  else
+    dry_run_fail "$label not found: $path"
+  fi
+}
+
+dry_run_check_command() {
+  local command_name=$1
+  local label=${2:-$1}
+
+  if command -v "$command_name" >/dev/null 2>&1; then
+    dry_run_pass "$label available: $(command -v "$command_name")"
+  else
+    dry_run_fail "$label is not available on PATH"
+  fi
+}
+
+dry_run_check_parent_writable() {
+  local label=$1
+  local path=$2
+  local parent
+
+  parent=$(find_existing_parent "$path")
+  if [[ -z $parent || ! -e $parent ]]; then
+    dry_run_fail "No existing parent path found for $label: $path"
+    return
+  fi
+
+  if [[ -w $parent ]]; then
+    dry_run_pass "$label parent is writable: $parent"
+  else
+    dry_run_fail "$label parent is not writable: $parent"
+  fi
+}
+
+dry_run_check_python_module() {
+  local python_bin=$1
+  local module_name=$2
+  local label=${3:-$module_name}
+
+  if ! command -v "$python_bin" >/dev/null 2>&1; then
+    dry_run_fail "Python interpreter not found for $label check: $python_bin"
+    return
+  fi
+
+  if "$python_bin" -c "import ${module_name}" >/dev/null 2>&1; then
+    dry_run_pass "$label import succeeded in $python_bin"
+  else
+    dry_run_fail "$label import failed in $python_bin"
+  fi
+}
+
+run_dry_run_validation() {
+  local run_tools=${RUN_TOOLS:-1}
+  local run_kleborate=${RUN_KLEBORATE:-1}
+  local run_fimtyper=${RUN_FIMTYPER:-0}
+  local default_tools_string=${DEFAULT_TOOLS_STRING:-abritamr amrfinderplus bracken checkm mlst plasmidfinder}
+  local additional_tools_string=${ADDITIONAL_TOOLS_STRING:-defensefinder ectyper ismapper mashdist mobsuite mykrobe phispy shigapass shigatyper shigeifinder}
+  local tools_string=${TOOLS_STRING:-}
+  local tmp_root=""
+  local tmp_samplesheet=""
+  local tmp_batch_dir=""
+  local active_samplesheet=""
+  local batch_count=0
+
+  if [[ -z $tools_string ]]; then
+    tools_string=$default_tools_string
+    if [[ ${RUN_ADDITIONAL_TOOLS:-0} != 0 ]]; then
+      tools_string="${tools_string} ${additional_tools_string}"
+    fi
+  fi
+
+  # shellcheck disable=SC2206
+  local tools_list=($tools_string)
+
+  log "INFO" "DRY_RUN=1. Validating configuration and dependencies without submitting jobs."
+  log "INFO" "Scheduler backend: $scheduler_backend"
+
+  scheduler_require_backend || fail "Unsupported scheduler backend for dry run: $scheduler_backend"
+
+  case "$scheduler_backend" in
+    pbs) dry_run_check_command qsub "PBS qsub" ;;
+    slurm) dry_run_check_command sbatch "Slurm sbatch" ;;
+  esac
+
+  if type module >/dev/null 2>&1; then
+    dry_run_pass "module command is available in the current shell"
+  else
+    dry_run_warn "module command is not available in the current shell. Job-time module loads are not being checked from this dry run."
+  fi
+
+  dry_run_check_dir "RUN_AGAR_DIR" "$run_agar_dir"
+  dry_run_check_file "submit_bactopia_batch_pipeline.sh" "$submit_script"
+  dry_run_check_file "split_bactopia_samplesheet.sh" "$split_script"
+  dry_run_check_file "validate_bactopia_fofn.sh" "$validate_script"
+  dry_run_check_file "run_consolidate_batches.pbs/slurm wrapper" "$(scheduler_resolve_script "$consolidate_pbs_script")"
+  dry_run_check_file "consolidate_bactopia_batches.R" "$consolidate_r_script"
+  dry_run_check_file "run_map_agrf_samplesheet_results.pbs/slurm wrapper" "$(scheduler_resolve_script "$map_pbs_script")"
+  dry_run_check_file "map_agrf_samplesheet_results.R" "$map_r_script"
+
+  if [[ $postprocess_only != 1 ]]; then
+    dry_run_check_path "BACTOPIA_PIPELINE" "$BACTOPIA_PIPELINE"
+    dry_run_check_path "DATASETS_CACHE" "$DATASETS_CACHE"
+    dry_run_check_file "NEXTFLOW_CONFIG" "$NEXTFLOW_CONFIG"
+    dry_run_check_parent_writable "SING_CACHE" "$SING_CACHE"
+  fi
+
+  if [[ $run_tools != 0 ]] && ( tools_string_contains "kraken2" "${tools_list[@]}" || tools_string_contains "bracken" "${tools_list[@]}" ); then
+    if [[ -n ${KRAKEN2_DB:-} ]]; then
+      dry_run_check_path "KRAKEN2_DB" "$KRAKEN2_DB"
+    else
+      dry_run_fail "KRAKEN2_DB is required because TOOLS_STRING includes kraken2 or bracken"
+    fi
+  fi
+
+  if [[ $run_tools != 0 ]] && tools_string_contains "mykrobe" "${tools_list[@]}"; then
+    if [[ -n ${MYKROBE_SPECIES:-} ]]; then
+      dry_run_pass "MYKROBE_SPECIES is set: ${MYKROBE_SPECIES}"
+    else
+      dry_run_fail "MYKROBE_SPECIES is required because TOOLS_STRING includes mykrobe"
+    fi
+  fi
+
+  if [[ $run_tools != 0 ]] && tools_string_contains "defensefinder" "${tools_list[@]}" && [[ -n ${DEFENSEFINDER_DB:-} ]]; then
+    dry_run_check_path "DEFENSEFINDER_DB" "$DEFENSEFINDER_DB"
+  fi
+
+  if [[ $run_kleborate != 0 ]]; then
+    dry_run_check_file "KLEBORATE_COMPAT_SCRIPT" "$KLEBORATE_COMPAT_SCRIPT"
+  fi
+
+  if [[ $run_fimtyper != 0 ]]; then
+    dry_run_check_file "FIMTYPER_PIPELINE" "$FIMTYPER_PIPELINE"
+    dry_run_check_file "FIMTYPER_CONFIG" "$FIMTYPER_CONFIG"
+    if [[ -n ${MERGE_FIMTYPER_SCRIPT:-} ]]; then
+      dry_run_check_file "MERGE_FIMTYPER_SCRIPT" "$MERGE_FIMTYPER_SCRIPT"
+    fi
+  fi
+
+  if [[ $run_mlst_review == 1 ]]; then
+    dry_run_check_file "run_review_mlst_from_tsv.pbs/slurm wrapper" "$(scheduler_resolve_script "$review_mlst_pbs_script")"
+    dry_run_check_file "run_review_mlst_from_tsv.sh" "$script_dir/run_review_mlst_from_tsv.sh"
+    dry_run_check_dir "MINIFORGE_ROOT" "$MINIFORGE_ROOT"
+    dry_run_check_dir "MLST_ENV" "$MLST_ENV"
+    if [[ -x $MLST_ENV/bin/mlst ]]; then
+      dry_run_pass "mlst executable found in MLST_ENV: $MLST_ENV/bin/mlst"
+    else
+      dry_run_fail "mlst executable not found in MLST_ENV: $MLST_ENV/bin/mlst"
+    fi
+    if [[ -x $MLST_ENV/bin/seqkit ]]; then
+      dry_run_pass "seqkit executable found in MLST_ENV: $MLST_ENV/bin/seqkit"
+    else
+      dry_run_fail "seqkit executable not found in MLST_ENV: $MLST_ENV/bin/seqkit"
+    fi
+  fi
+
+  if [[ $run_export_results_workbook == 1 ]]; then
+    dry_run_check_file "run_export_bactopia_results_workbook.pbs/slurm wrapper" "$(scheduler_resolve_script "$export_results_workbook_pbs_script")"
+    dry_run_check_file "export_bactopia_results_workbook.py" "$export_results_workbook_script"
+    dry_run_check_command "$export_results_workbook_python_bin" "Workbook export Python interpreter"
+    dry_run_check_python_module "$export_results_workbook_python_bin" "openpyxl" "openpyxl"
+  fi
+
+  if [[ $run_collect_assemblies == 1 || $run_st131typer == 1 ]]; then
+    dry_run_check_file "run_fetch_batch_assemblies.pbs/slurm wrapper" "$(scheduler_resolve_script "$fetch_assemblies_pbs_script")"
+  fi
+
+  if [[ $run_st131typer == 1 ]]; then
+    dry_run_check_file "run_st131typer_from_assemblies.pbs/slurm wrapper" "$(scheduler_resolve_script "$st131typer_pbs_script")"
+    dry_run_check_file "ST131Typer.sh" "$st131typer_script"
+  fi
+
+  if [[ $postprocess_only != 1 && $skip_normalize != 1 && $is_agar_project == 1 ]]; then
+    if bash "$normalize_script" --dry-run "$raw_fastq_dir" >/dev/null 2>&1; then
+      dry_run_pass "AGAR filename normalization dry run completed successfully"
+    else
+      dry_run_fail "AGAR filename normalization dry run failed for: $raw_fastq_dir"
+    fi
+  fi
+
+  if [[ $postprocess_only == 1 ]]; then
+    dry_run_pass "POSTPROCESS_ONLY=1, so FOFN creation and batch submission checks were skipped"
+  else
+    if [[ -f $samplesheet_path ]]; then
+      active_samplesheet=$samplesheet_path
+      if bash "$validate_script" "$active_samplesheet" >/dev/null 2>&1; then
+        dry_run_pass "Existing samplesheet/FOFN validated: $active_samplesheet"
+      else
+        dry_run_fail "Existing samplesheet/FOFN failed validation: $active_samplesheet"
+      fi
+    elif [[ -n $create_fofn_command ]]; then
+      dry_run_warn "CREATE_FOFN_COMMAND is set. Dry run did not execute this custom command automatically."
+    elif [[ -f $create_fofn_script ]]; then
+      tmp_root=$(mktemp -d)
+      tmp_samplesheet=$tmp_root/samplesheet.fofn
+      if [[ $is_agar_project == 1 ]]; then
+        if INCLUDE_SAMPLE_REGEX="$agar_sample_regex" bash "$create_fofn_script" "$raw_fastq_dir" "$tmp_samplesheet" >/dev/null 2>&1; then
+          dry_run_pass "FOFN creation dry run succeeded with AGAR sample filtering"
+          active_samplesheet=$tmp_samplesheet
+        else
+          dry_run_fail "FOFN creation dry run failed using CREATE_FOFN_SCRIPT"
+        fi
+      else
+        if bash "$create_fofn_script" "$raw_fastq_dir" "$tmp_samplesheet" >/dev/null 2>&1; then
+          dry_run_pass "FOFN creation dry run succeeded"
+          active_samplesheet=$tmp_samplesheet
+        else
+          dry_run_fail "FOFN creation dry run failed using CREATE_FOFN_SCRIPT"
+        fi
+      fi
+
+      if [[ -n $active_samplesheet && -f $active_samplesheet ]]; then
+        if bash "$validate_script" "$active_samplesheet" >/dev/null 2>&1; then
+          dry_run_pass "Generated dry-run FOFN validated successfully"
+        else
+          dry_run_fail "Generated dry-run FOFN failed validation"
+        fi
+      fi
+    else
+      dry_run_fail "No existing samplesheet/FOFN was found and no FOFN creation helper is available"
+    fi
+
+    if [[ -n $active_samplesheet && -f $active_samplesheet && -f $split_script ]]; then
+      [[ -z $tmp_root ]] && tmp_root=$(mktemp -d)
+      tmp_batch_dir=$tmp_root/batches
+      if bash "$split_script" "$active_samplesheet" "$batch_size" "$tmp_batch_dir" "$batch_prefix" >/dev/null 2>&1; then
+        batch_count=$(find "$tmp_batch_dir" -maxdepth 1 -type f -name "${batch_prefix}_*.fofn" | wc -l | tr -d ' ')
+        dry_run_pass "Batch split dry run succeeded and would create ${batch_count} batch file(s)"
+      else
+        dry_run_fail "Batch split dry run failed for samplesheet: $active_samplesheet"
+      fi
+    fi
+  fi
+
+  if [[ -n $tmp_root && -d $tmp_root ]]; then
+    rm -rf "$tmp_root"
+  fi
+
+  if (( dry_run_failures > 0 )); then
+    fail "Dry run failed with ${dry_run_failures} issue(s) and ${dry_run_warnings} warning(s). Review the log output above."
+  fi
+
+  log "INFO" "Dry run completed successfully with ${dry_run_warnings} warning(s). No jobs were submitted."
+  exit 0
 }
 
 check_filesystem_inode_headroom() {
@@ -593,7 +907,7 @@ if ! [[ $batch_size =~ ^[1-9][0-9]*$ ]]; then
   fail "BATCH_SIZE must be a positive integer: $batch_size"
 fi
 
-for path in "$submit_script" "$normalize_script" "$validate_script" "$consolidate_pbs_script" "$consolidate_r_script" "$map_pbs_script" "$map_r_script" "$review_mlst_pbs_script"; do
+for path in "$submit_script" "$split_script" "$normalize_script" "$validate_script" "$consolidate_pbs_script" "$consolidate_r_script" "$map_pbs_script" "$map_r_script" "$review_mlst_pbs_script"; do
   if [[ ! -f $path ]]; then
     fail "Required script not found: $path"
   fi
@@ -609,6 +923,10 @@ fi
 
 if [[ $run_collect_assemblies != 0 && $run_collect_assemblies != 1 ]]; then
   fail "RUN_COLLECT_ASSEMBLIES must be 0 or 1: $run_collect_assemblies"
+fi
+
+if [[ $dry_run != 0 && $dry_run != 1 ]]; then
+  fail "DRY_RUN must be 0 or 1: $dry_run"
 fi
 
 if [[ $st131_append_after_workbook != 0 && $st131_append_after_workbook != 1 ]]; then
@@ -678,6 +996,11 @@ fi
 
 current_step="checking inode headroom"
 run_inode_preflight
+
+if [[ $dry_run == 1 ]]; then
+  current_step="running dry-run validation"
+  run_dry_run_validation
+fi
 
 if [[ $postprocess_only == 1 ]]; then
   log "INFO" "Skipping FASTQ sample name normalization in POSTPROCESS_ONLY mode"

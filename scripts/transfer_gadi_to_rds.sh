@@ -15,6 +15,8 @@ Optional environment variables:
   RDS_DEST             Overrides the interactive RDS destination prompt
   RDS_SFTP_HOST        Default: research-data-ext.sydney.edu.au
   RDS_SFTP_USER        Required RDS username for sftp login
+  RDS_SFTP_IDENTITY_FILE Optional SSH private key file for sftp; when set the
+                        helper adds `-i <file> -o IdentitiesOnly=yes`
   RDS_SFTP_OPTS        Extra options passed to sftp, for example: -v
   RDS_SFTP_CHUNK_SIZE  Number of files per SFTP session, default: 100
   RDS_UPLOAD_MANIFEST  Persistent uploaded-files manifest path
@@ -39,6 +41,7 @@ src_path=${1:-}
 dest=${2:-${RDS_DEST:-}}
 host=${RDS_SFTP_HOST:-research-data-ext.sydney.edu.au}
 user=${RDS_SFTP_USER:-}
+sftp_identity_file=${RDS_SFTP_IDENTITY_FILE:-}
 sftp_opts=${RDS_SFTP_OPTS:-}
 chunk_size=${RDS_SFTP_CHUNK_SIZE:-100}
 manifest_path=${RDS_UPLOAD_MANIFEST:-}
@@ -86,12 +89,17 @@ if ! [[ $chunk_size =~ ^[0-9]+$ ]] || [[ $chunk_size -lt 1 ]]; then
   exit 1
 fi
 
+if [[ -n $sftp_identity_file && ! -f $sftp_identity_file ]]; then
+  echo "RDS_SFTP_IDENTITY_FILE not found: $sftp_identity_file" >&2
+  exit 1
+fi
+
 if ! [[ $prioritize_uploads =~ ^[01]$ ]]; then
   echo "RDS_PRIORITIZE_UPLOADS must be 0 or 1." >&2
   exit 1
 fi
 
-for cmd in find sftp basename dirname sort awk sed comm wc mktemp cp mv tr touch grep cut mkdir; do
+for cmd in find sftp basename dirname sort awk sed comm wc mktemp cp mv tr touch grep cut mkdir cat; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "Required command not found: $cmd" >&2
     exit 1
@@ -157,6 +165,10 @@ prioritize_pending_files() {
 
 run_sftp() {
   local commands_file="$1"
+  local stdout_file="$tmpdir/last_sftp.stdout"
+  local stderr_file="$tmpdir/last_sftp.stderr"
+  local sftp_status=0
+  local -a sftp_opts_array
 
   if [[ -n $sftp_opts ]]; then
     # shellcheck disable=SC2206
@@ -165,7 +177,33 @@ run_sftp() {
     sftp_opts_array=()
   fi
 
-  sftp "${sftp_opts_array[@]}" "$user@$host" < "$commands_file"
+  if [[ -n $sftp_identity_file ]]; then
+    sftp_opts_array+=(-o IdentitiesOnly=yes -i "$sftp_identity_file")
+  fi
+
+  if sftp "${sftp_opts_array[@]}" "$user@$host" < "$commands_file" > "$stdout_file" 2> "$stderr_file"; then
+    sftp_status=0
+  else
+    sftp_status=$?
+  fi
+
+  if [[ -s $stdout_file ]]; then
+    cat "$stdout_file"
+  fi
+  if [[ -s $stderr_file ]]; then
+    cat "$stderr_file" >&2
+  fi
+
+  return "$sftp_status"
+}
+
+show_sftp_auth_hint() {
+  cat >&2 <<EOF
+SFTP disconnected after too many authentication failures.
+If your SSH agent is offering several keys, export RDS_SFTP_IDENTITY_FILE to the
+single private key that should be used, then resubmit with qsub -V. Example:
+  export RDS_SFTP_IDENTITY_FILE=\$HOME/.ssh/id_ed25519
+EOF
 }
 
 append_remote_mkdirs() {
@@ -425,6 +463,7 @@ log "Files queued for upload: $total_files_queued"
 log "Transfer info file: $info_file"
 log "SFTP chunk size: $chunk_size"
 log "Upload manifest: $manifest_path"
+log "RDS SFTP identity file: ${sftp_identity_file:-<default ssh selection>}"
 log "Prioritize uploads: $prioritize_uploads"
 if [[ $ignore_manifest == 1 ]]; then
   log "Manifest handling: ignored for this run; all eligible local files will be queued"
@@ -510,7 +549,12 @@ total_chunk_count=$((total_chunk_count + 1))
 log "Uploading files to RDS via SFTP in $total_chunk_count chunk(s)"
 for chunk_file in "$tmpdir"/upload_*.sftp; do
   log "Running $(basename "$chunk_file")"
-  run_sftp "$chunk_file"
+  if ! run_sftp "$chunk_file"; then
+    if [[ -s $tmpdir/last_sftp.stderr ]] && grep -Fqi 'Too many authentication failures' "$tmpdir/last_sftp.stderr"; then
+      show_sftp_auth_hint
+    fi
+    exit 1
+  fi
   chunk_list="${chunk_file%.sftp}.files"
   if [[ -f $chunk_list ]]; then
     while IFS= read -r uploaded_rel_path; do

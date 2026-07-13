@@ -40,6 +40,8 @@ Optional environment variables:
   RDS_SFTP_USER             Required if USER is not the RDS username
   GADI_LOCAL_NAME           Rename the downloaded file or directory on Gadi
   RDS_SFTP_HOST             Default: research-data-ext.sydney.edu.au
+  RDS_SFTP_IDENTITY_FILE    Optional SSH private key file for sftp; when set
+                            the helper adds `-i <file> -o IdentitiesOnly=yes`
   RDS_SFTP_OPTS             Extra options passed to sftp, for example: -v
   RDS_RESUME_DOWNLOAD       If set to 1, attempt resumable download mode, default: 1
   RDS_SKIP_IF_DEST_EXISTS   If set to 1, skip the download when the final local target already exists
@@ -58,6 +60,7 @@ GADI_DEST=${2:-${GADI_DEST:-}}
 RDS_SFTP_USER=${RDS_SFTP_USER:-${USER:-}}
 GADI_LOCAL_NAME=${GADI_LOCAL_NAME:-}
 RDS_SFTP_HOST=${RDS_SFTP_HOST:-research-data-ext.sydney.edu.au}
+RDS_SFTP_IDENTITY_FILE=${RDS_SFTP_IDENTITY_FILE:-}
 RDS_SFTP_OPTS=${RDS_SFTP_OPTS:-}
 RDS_RESUME_DOWNLOAD=${RDS_RESUME_DOWNLOAD:-1}
 RDS_SKIP_IF_DEST_EXISTS=${RDS_SKIP_IF_DEST_EXISTS:-0}
@@ -82,6 +85,11 @@ require_settings() {
 
   if ! [[ $RDS_SKIP_IF_DEST_EXISTS =~ ^[01]$ ]]; then
     echo "RDS_SKIP_IF_DEST_EXISTS must be 0 or 1." >&2
+    exit 1
+  fi
+
+  if [[ -n $RDS_SFTP_IDENTITY_FILE && ! -f $RDS_SFTP_IDENTITY_FILE ]]; then
+    echo "RDS_SFTP_IDENTITY_FILE not found: $RDS_SFTP_IDENTITY_FILE" >&2
     exit 1
   fi
 }
@@ -109,6 +117,7 @@ submit_job() {
   export RDS_SFTP_USER
   export GADI_LOCAL_NAME
   export RDS_SFTP_HOST
+  export RDS_SFTP_IDENTITY_FILE
   export RDS_SFTP_OPTS
   export RDS_RESUME_DOWNLOAD
   export RDS_SKIP_IF_DEST_EXISTS
@@ -142,7 +151,20 @@ run_sftp() {
     sftp_opts_array=()
   fi
 
+  if [[ -n $RDS_SFTP_IDENTITY_FILE ]]; then
+    sftp_opts_array+=(-o IdentitiesOnly=yes -i "$RDS_SFTP_IDENTITY_FILE")
+  fi
+
   sftp "${sftp_opts_array[@]}" "${RDS_SFTP_USER}@${RDS_SFTP_HOST}" < "$commands_file" > "$output_file" 2> "$error_file"
+}
+
+show_sftp_auth_hint() {
+  cat >&2 <<EOF
+SFTP disconnected after too many authentication failures.
+If your SSH agent is offering several keys, export RDS_SFTP_IDENTITY_FILE to the
+single private key that should be used, then resubmit the helper. Example:
+  export RDS_SFTP_IDENTITY_FILE=\$HOME/.ssh/id_ed25519
+EOF
 }
 
 extract_remote_listing() {
@@ -228,6 +250,7 @@ run_transfer() {
   log "  RDS_SRC=$RDS_SRC"
   log "  GADI_DEST=$GADI_DEST"
   log "  RDS_SFTP_USER=$RDS_SFTP_USER"
+  log "  RDS_SFTP_IDENTITY_FILE=${RDS_SFTP_IDENTITY_FILE:-<default ssh selection>}"
   log "  GADI_LOCAL_NAME=${GADI_LOCAL_NAME:-<source basename>}"
   log "  RDS_RESUME_DOWNLOAD=$RDS_RESUME_DOWNLOAD"
   log "  RDS_SKIP_IF_DEST_EXISTS=$RDS_SKIP_IF_DEST_EXISTS"
@@ -321,6 +344,9 @@ run_transfer() {
 
   if ! run_sftp "$download_commands" "$download_output" "$download_error"; then
     cat "$download_error" >&2
+    if grep -Fqi 'Too many authentication failures' "$download_error"; then
+      show_sftp_auth_hint
+    fi
     exit 1
   fi
 

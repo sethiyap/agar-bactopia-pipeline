@@ -105,6 +105,7 @@ Useful notes:
 - `RDS_SRC` can be a file or a directory
 - `GADI_DEST` is the destination parent directory on Gadi
 - set `GADI_LOCAL_NAME` if you want a different name on Gadi
+- if the RDS server disconnects with `Too many authentication failures`, set `RDS_SFTP_IDENTITY_FILE=$HOME/.ssh/<your_key>` so the helper uses only that key
 - set `RDS_RESUME_DOWNLOAD=1` to resume partial downloads
 - set `RDS_SKIP_IF_DEST_EXISTS=1` to skip work when the final target already exists
 - set `DEBUG_LOG_DIR=/scratch/rg42/${USER}/transfer_logs` if you want the detailed transfer log in a known place
@@ -149,7 +150,27 @@ For non-AGAR runs:
 - if you provide your own `samplesheet.fofn`, its `sample` values are used as provided
 - in both cases, metadata sample names must match the final FOFN sample names
 
-### 4. Check The Site Config Once Per Install
+### 4. Short Gadi Install
+
+If you are using the shared `rg42` install, the pipeline is expected at:
+
+```bash
+/g/data/rg42/agar-bactopia-pipeline
+```
+
+If it has not been installed yet on Gadi, a short shared install is:
+
+```bash
+cd /g/data/rg42
+git clone https://github.com/sethiyap/agar-bactopia-pipeline.git agar-bactopia-pipeline
+cd /home/562/<nci_username>
+```
+
+That is enough for most users to understand where the shared pipeline lives.
+The fuller shared-install notes stay in `Shared Install And Other Systems`
+below.
+
+### 5. Check The Site Config Once Per Install
 
 If you are using the shared `rg42` install and it has already been configured,
 you may not need to touch this step. If you are maintaining the install or
@@ -174,7 +195,7 @@ Then review `config/sites/gadi.local.env` and confirm these paths are correct:
 - `MERGE_FIMTYPER_SCRIPT`
 - `SING_CACHE`
 
-### 5. Submit The Pipeline
+### 6. Submit The Pipeline
 
 Normal Gadi submission:
 
@@ -218,7 +239,7 @@ under names such as:
 - `batch_bactopia_001_tools`
 - `batch_bactopia_consolidated`
 
-### 6. What Happens After Submission
+### 7. What Happens After Submission
 
 After you submit, the launcher usually does the following in order:
 
@@ -234,7 +255,7 @@ After you submit, the launcher usually does the following in order:
 If you also turn on ST131Typer, that runs later in the chain after the core
 workflow has finished.
 
-### 7. Expected Output Structure
+### 8. Expected Output Structure
 
 After a normal run, the main outputs live under `RESULTS_ROOT`.
 
@@ -294,7 +315,7 @@ Example:
     └── ...
 ```
 
-### 8. Copy Finished Results Back To RDS
+### 9. Copy Finished Results Back To RDS
 
 After the run finishes on Gadi, use the packaged upload helper. The recommended
 pattern is `export ...` followed by `qsub -V`.
@@ -308,6 +329,8 @@ Copy a finished results root:
 export SRC_PATH=/scratch/rg42/AGAR/intermediates/2025/B07
 export RDS_DEST=/rds/PRJ-AGAR/PRJ-AGAR/intermediates/2025/B07
 export RDS_SFTP_USER=<your_rds_username>
+# Optional when the RDS server reports "Too many authentication failures":
+# export RDS_SFTP_IDENTITY_FILE=$HOME/.ssh/id_ed25519
 export DEBUG_LOG_DIR=/scratch/rg42/${USER}/transfer_logs
 export RDS_UPLOAD_MANIFEST_DIR=/scratch/rg42/${USER}/.rds_transfer_manifests
 mkdir -p "$DEBUG_LOG_DIR" "$RDS_UPLOAD_MANIFEST_DIR"
@@ -320,6 +343,8 @@ Copy only the main deliverables first:
 export SRC_PATH=/scratch/rg42/AGAR/intermediates/2025/B07
 export RDS_DEST=/rds/PRJ-AGAR/PRJ-AGAR/intermediates/2025/B07
 export RDS_SFTP_USER=<your_rds_username>
+# Optional when the RDS server reports "Too many authentication failures":
+# export RDS_SFTP_IDENTITY_FILE=$HOME/.ssh/id_ed25519
 export RDS_INCLUDE_DIRS='<prefix>_samplesheet_with_results.tsv,batch_bactopia_consolidated'
 export DEBUG_LOG_DIR=/scratch/rg42/${USER}/transfer_logs
 export RDS_UPLOAD_MANIFEST_DIR=/scratch/rg42/${USER}/.rds_transfer_manifests
@@ -333,6 +358,7 @@ filename.
 Transfer notes:
 
 - `RDS_SFTP_USER` is required for uploads
+- if the upload log shows `Too many authentication failures`, set `RDS_SFTP_IDENTITY_FILE=$HOME/.ssh/<your_key>` before `qsub -V`
 - passwords are not stored in the script
 - the wrapper defaults to scratch-backed debug and manifest locations if you do not override them
 - by default, `_work` and `.nextflow.log*` are excluded from upload

@@ -163,7 +163,7 @@ show_sftp_auth_hint() {
 SFTP disconnected after too many authentication failures.
 If your SSH agent is offering several keys, export RDS_SFTP_IDENTITY_FILE to the
 single private key that should be used, then resubmit the helper. Example:
-  export RDS_SFTP_IDENTITY_FILE=\$HOME/.ssh/id_ed25519
+  export RDS_SFTP_IDENTITY_FILE=\$HOME/.ssh/<your_private_key>
 EOF
 }
 

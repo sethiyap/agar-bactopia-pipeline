@@ -330,7 +330,7 @@ export SRC_PATH=/scratch/rg42/AGAR/intermediates/2025/B07
 export RDS_DEST=/rds/PRJ-AGAR/PRJ-AGAR/intermediates/2025/B07
 export RDS_SFTP_USER=<your_rds_username>
 # Optional when the RDS server reports "Too many authentication failures":
-# export RDS_SFTP_IDENTITY_FILE=$HOME/.ssh/id_ed25519
+# export RDS_SFTP_IDENTITY_FILE=$HOME/.ssh/<your_private_key>
 export DEBUG_LOG_DIR=/scratch/rg42/${USER}/transfer_logs
 export RDS_UPLOAD_MANIFEST_DIR=/scratch/rg42/${USER}/.rds_transfer_manifests
 mkdir -p "$DEBUG_LOG_DIR" "$RDS_UPLOAD_MANIFEST_DIR"
@@ -344,7 +344,7 @@ export SRC_PATH=/scratch/rg42/AGAR/intermediates/2025/B07
 export RDS_DEST=/rds/PRJ-AGAR/PRJ-AGAR/intermediates/2025/B07
 export RDS_SFTP_USER=<your_rds_username>
 # Optional when the RDS server reports "Too many authentication failures":
-# export RDS_SFTP_IDENTITY_FILE=$HOME/.ssh/id_ed25519
+# export RDS_SFTP_IDENTITY_FILE=$HOME/.ssh/<your_private_key>
 export RDS_INCLUDE_DIRS='<prefix>_samplesheet_with_results.tsv,batch_bactopia_consolidated'
 export DEBUG_LOG_DIR=/scratch/rg42/${USER}/transfer_logs
 export RDS_UPLOAD_MANIFEST_DIR=/scratch/rg42/${USER}/.rds_transfer_manifests

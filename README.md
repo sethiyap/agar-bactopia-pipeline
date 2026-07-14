@@ -115,6 +115,12 @@ RDS_SFTP_USE_PASSWORD=1 \
 This prompts once on the login node, stores the password in a temporary file,
 and removes that file after the PBS job finishes.
 
+If the PBS job says `expect` is not on `PATH`, set:
+
+```bash
+export RDS_EXPECT_BIN=/usr/bin/expect
+```
+
 Useful notes:
 
 - `RDS_SRC` can be a file or a directory
@@ -365,6 +371,12 @@ export DEBUG_LOG_DIR=/scratch/rg42/${USER}/transfer_logs
 export RDS_UPLOAD_MANIFEST_DIR=/scratch/rg42/${USER}/.rds_transfer_manifests
 mkdir -p "$DEBUG_LOG_DIR" "$RDS_UPLOAD_MANIFEST_DIR"
 /g/data/rg42/agar-bactopia-pipeline/scripts/submit_transfer_gadi_to_rds.sh
+```
+
+If the PBS job says `expect` is not on `PATH`, add:
+
+```bash
+export RDS_EXPECT_BIN=/usr/bin/expect
 ```
 
 Copy only the main deliverables first:

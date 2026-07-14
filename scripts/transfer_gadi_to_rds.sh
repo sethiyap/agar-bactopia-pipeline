@@ -19,6 +19,7 @@ Optional environment variables:
                         helper adds `-i <file> -o IdentitiesOnly=yes`
   RDS_SFTP_PASSWORD_FILE Optional file containing the SFTP password; when set
                         the helper uses expect-driven password auth
+  RDS_EXPECT_BIN        Optional full path to expect for password auth
   RDS_SFTP_OPTS        Extra options passed to sftp, for example: -v
   RDS_SFTP_CHUNK_SIZE  Number of files per SFTP session, default: 100
   RDS_UPLOAD_MANIFEST  Persistent uploaded-files manifest path
@@ -45,6 +46,7 @@ host=${RDS_SFTP_HOST:-research-data-ext.sydney.edu.au}
 user=${RDS_SFTP_USER:-}
 sftp_identity_file=${RDS_SFTP_IDENTITY_FILE:-}
 sftp_password_file=${RDS_SFTP_PASSWORD_FILE:-}
+expect_bin=${RDS_EXPECT_BIN:-}
 sftp_opts=${RDS_SFTP_OPTS:-}
 chunk_size=${RDS_SFTP_CHUNK_SIZE:-100}
 manifest_path=${RDS_UPLOAD_MANIFEST:-}
@@ -109,13 +111,38 @@ for cmd in find sftp basename dirname sort awk sed comm wc mktemp cp mv tr touch
   fi
 done
 
-if [[ -n $sftp_password_file ]] && ! command -v expect >/dev/null 2>&1; then
-  echo "Password auth requires expect, but it was not found in PATH." >&2
-  exit 1
-fi
-
 log() {
   printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
+}
+
+resolve_expect_bin() {
+  local candidate=""
+
+  if [[ -n $expect_bin ]]; then
+    if [[ -x $expect_bin ]]; then
+      printf '%s\n' "$expect_bin"
+      return 0
+    fi
+    echo "RDS_EXPECT_BIN is not executable: $expect_bin" >&2
+    return 1
+  fi
+
+  candidate="$(command -v expect 2>/dev/null || true)"
+  if [[ -n $candidate && -x $candidate ]]; then
+    printf '%s\n' "$candidate"
+    return 0
+  fi
+
+  for candidate in /usr/bin/expect /bin/expect; do
+    if [[ -x $candidate ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+
+  echo "Password auth requires expect, but it was not found in PATH and no fallback path was found." >&2
+  echo "Set RDS_EXPECT_BIN explicitly, for example: export RDS_EXPECT_BIN=/usr/bin/expect" >&2
+  return 1
 }
 
 validate_sftp_identity_file() {
@@ -172,6 +199,10 @@ fi
 
 if ! validate_sftp_password_file "$sftp_password_file"; then
   exit 1
+fi
+
+if [[ -n $sftp_password_file ]]; then
+  expect_bin="$(resolve_expect_bin)" || exit 1
 fi
 
 default_manifest_dir() {
@@ -242,7 +273,7 @@ run_sftp() {
   fi
 
   if [[ -n $sftp_password_file ]]; then
-    if expect -c '
+    if "$expect_bin" -c '
       set timeout -1
       match_max 1048576
       set commands_file [lindex $argv 0]

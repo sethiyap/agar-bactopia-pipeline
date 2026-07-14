@@ -45,6 +45,7 @@ Optional environment variables:
   RDS_SFTP_USE_PASSWORD     If set to 1, prompt for the RDS password before qsub
   RDS_SFTP_PASSWORD_FILE    Optional file containing the SFTP password; when set
                             the helper uses expect-driven password auth
+  RDS_EXPECT_BIN            Optional full path to expect for password auth
   RDS_SFTP_OPTS             Extra options passed to sftp, for example: -v
   RDS_RESUME_DOWNLOAD       If set to 1, attempt resumable download mode, default: 1
   RDS_SKIP_IF_DEST_EXISTS   If set to 1, skip the download when the final local target already exists
@@ -66,6 +67,7 @@ RDS_SFTP_HOST=${RDS_SFTP_HOST:-research-data-ext.sydney.edu.au}
 RDS_SFTP_IDENTITY_FILE=${RDS_SFTP_IDENTITY_FILE:-}
 RDS_SFTP_USE_PASSWORD=${RDS_SFTP_USE_PASSWORD:-0}
 RDS_SFTP_PASSWORD_FILE=${RDS_SFTP_PASSWORD_FILE:-}
+RDS_EXPECT_BIN=${RDS_EXPECT_BIN:-}
 RDS_SFTP_DELETE_PASSWORD_FILE=${RDS_SFTP_DELETE_PASSWORD_FILE:-0}
 RDS_SFTP_OPTS=${RDS_SFTP_OPTS:-}
 RDS_RESUME_DOWNLOAD=${RDS_RESUME_DOWNLOAD:-1}
@@ -115,6 +117,36 @@ require_settings() {
 
 log() {
   printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
+}
+
+resolve_expect_bin() {
+  local candidate=""
+
+  if [[ -n $RDS_EXPECT_BIN ]]; then
+    if [[ -x $RDS_EXPECT_BIN ]]; then
+      printf '%s\n' "$RDS_EXPECT_BIN"
+      return 0
+    fi
+    echo "RDS_EXPECT_BIN is not executable: $RDS_EXPECT_BIN" >&2
+    return 1
+  fi
+
+  candidate="$(command -v expect 2>/dev/null || true)"
+  if [[ -n $candidate && -x $candidate ]]; then
+    printf '%s\n' "$candidate"
+    return 0
+  fi
+
+  for candidate in /usr/bin/expect /bin/expect; do
+    if [[ -x $candidate ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+
+  echo "Password auth requires expect, but it was not found in PATH and no fallback path was found." >&2
+  echo "Set RDS_EXPECT_BIN explicitly, for example: export RDS_EXPECT_BIN=/usr/bin/expect" >&2
+  return 1
 }
 
 validate_sftp_identity_file() {
@@ -240,6 +272,7 @@ submit_job() {
   export RDS_SFTP_IDENTITY_FILE
   export RDS_SFTP_USE_PASSWORD
   export RDS_SFTP_PASSWORD_FILE
+  export RDS_EXPECT_BIN
   export RDS_SFTP_DELETE_PASSWORD_FILE
   export RDS_SFTP_OPTS
   export RDS_RESUME_DOWNLOAD
@@ -267,6 +300,7 @@ run_sftp() {
   local output_file="$2"
   local error_file="$3"
   local -a sftp_opts_array
+  local resolved_expect_bin=""
 
   if [[ -n $RDS_SFTP_OPTS ]]; then
     # shellcheck disable=SC2206
@@ -276,7 +310,8 @@ run_sftp() {
   fi
 
   if [[ -n $RDS_SFTP_PASSWORD_FILE ]]; then
-    expect -c '
+    resolved_expect_bin="$(resolve_expect_bin)" || return 1
+    "$resolved_expect_bin" -c '
       set timeout -1
       match_max 1048576
       set commands_file [lindex $argv 0]
@@ -446,8 +481,7 @@ run_transfer() {
     fi
   done
 
-  if [[ -n $RDS_SFTP_PASSWORD_FILE ]] && ! command -v expect >/dev/null 2>&1; then
-    echo "Password auth requires expect, but it was not found in PATH." >&2
+  if [[ -n $RDS_SFTP_PASSWORD_FILE ]] && ! resolve_expect_bin >/dev/null; then
     exit 1
   fi
 

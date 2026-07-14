@@ -20,7 +20,6 @@ Usage:
 Optional environment variables:
   RDS_SFTP_USE_PASSWORD     If set to 1, prompt for the RDS password before qsub
   RDS_SFTP_PASSWORD_FILE    Existing password file to reuse instead of prompting
-  RDS_EXPECT_BIN            Optional full path to expect for password auth
   PBS_LOG_DIR               Optional directory for PBS stdout/stderr files
 EOF
 }
@@ -30,7 +29,6 @@ RDS_DEST=${RDS_DEST:-}
 RDS_SFTP_USER=${RDS_SFTP_USER:-}
 RDS_SFTP_USE_PASSWORD=${RDS_SFTP_USE_PASSWORD:-0}
 RDS_SFTP_PASSWORD_FILE=${RDS_SFTP_PASSWORD_FILE:-}
-RDS_EXPECT_BIN=${RDS_EXPECT_BIN:-}
 RDS_SFTP_DELETE_PASSWORD_FILE=${RDS_SFTP_DELETE_PASSWORD_FILE:-0}
 PBS_LOG_DIR=${PBS_LOG_DIR:-}
 
@@ -110,7 +108,6 @@ export RDS_DEST
 export RDS_SFTP_USER
 export RDS_SFTP_USE_PASSWORD
 export RDS_SFTP_PASSWORD_FILE
-export RDS_EXPECT_BIN
 export RDS_SFTP_DELETE_PASSWORD_FILE
 
 if [[ -n $PBS_LOG_DIR ]]; then

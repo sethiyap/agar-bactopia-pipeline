@@ -18,8 +18,7 @@ Optional environment variables:
   RDS_SFTP_IDENTITY_FILE Optional SSH private key file for sftp; when set the
                         helper adds `-i <file> -o IdentitiesOnly=yes`
   RDS_SFTP_PASSWORD_FILE Optional file containing the SFTP password; when set
-                        the helper uses expect-driven password auth
-  RDS_EXPECT_BIN        Optional full path to expect for password auth
+                        the helper uses SSH_ASKPASS-driven password auth
   RDS_SFTP_OPTS        Extra options passed to sftp, for example: -v
   RDS_SFTP_CHUNK_SIZE  Number of files per SFTP session, default: 100
   RDS_UPLOAD_MANIFEST  Persistent uploaded-files manifest path
@@ -46,7 +45,6 @@ host=${RDS_SFTP_HOST:-research-data-ext.sydney.edu.au}
 user=${RDS_SFTP_USER:-}
 sftp_identity_file=${RDS_SFTP_IDENTITY_FILE:-}
 sftp_password_file=${RDS_SFTP_PASSWORD_FILE:-}
-expect_bin=${RDS_EXPECT_BIN:-}
 sftp_opts=${RDS_SFTP_OPTS:-}
 chunk_size=${RDS_SFTP_CHUNK_SIZE:-100}
 manifest_path=${RDS_UPLOAD_MANIFEST:-}
@@ -115,37 +113,6 @@ log() {
   printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
 }
 
-resolve_expect_bin() {
-  local candidate=""
-
-  if [[ -n $expect_bin ]]; then
-    if [[ -x $expect_bin ]]; then
-      printf '%s\n' "$expect_bin"
-      return 0
-    fi
-    echo "RDS_EXPECT_BIN is not executable: $expect_bin" >&2
-    echo "Falling back to auto-detection for expect." >&2
-  fi
-
-  candidate="$(command -v expect 2>/dev/null || true)"
-  if [[ -n $candidate && -x $candidate ]]; then
-    printf '%s\n' "$candidate"
-    return 0
-  fi
-
-  for candidate in /usr/bin/expect /bin/expect; do
-    if [[ -x $candidate ]]; then
-      printf '%s\n' "$candidate"
-      return 0
-    fi
-  done
-
-  echo "Password auth requires expect, but it was not found in PATH and no fallback path was found." >&2
-  echo "Set RDS_EXPECT_BIN explicitly to the real Gadi path, for example:" >&2
-  echo "  export RDS_EXPECT_BIN=\$(command -v expect)" >&2
-  return 1
-}
-
 validate_sftp_identity_file() {
   local identity_file="$1"
   local identity_base=""
@@ -200,10 +167,6 @@ fi
 
 if ! validate_sftp_password_file "$sftp_password_file"; then
   exit 1
-fi
-
-if [[ -n $sftp_password_file ]]; then
-  expect_bin="$(resolve_expect_bin)" || exit 1
 fi
 
 default_manifest_dir() {
@@ -264,6 +227,7 @@ run_sftp() {
   local stdout_file="$tmpdir/last_sftp.stdout"
   local stderr_file="$tmpdir/last_sftp.stderr"
   local sftp_status=0
+  local askpass_script=""
   local -a sftp_opts_array
 
   if [[ -n $sftp_opts ]]; then
@@ -274,44 +238,23 @@ run_sftp() {
   fi
 
   if [[ -n $sftp_password_file ]]; then
-    if "$expect_bin" -c '
-      set timeout -1
-      match_max 1048576
-      set commands_file [lindex $argv 0]
-      set password_file [lindex $argv 1]
-      set user_host [lindex $argv 2]
-      set sftp_args [lrange $argv 3 end]
-      set pw_fd [open $password_file r]
-      set password [string trimright [read $pw_fd] "\r\n"]
-      close $pw_fd
-      set sent_commands 0
-      log_user 1
-      spawn sftp {*}$sftp_args $user_host
-      expect {
-        -re "(?i)are you sure you want to continue connecting.*" {
-          send -- "yes\r"
-          exp_continue
-        }
-        -re "(?i)password:" {
-          send -- "$password\r"
-          exp_continue
-        }
-        -re {sftp>} {
-          if {!$sent_commands} {
-            set cmd_fd [open $commands_file r]
-            while {[gets $cmd_fd line] >= 0} {
-              send -- "$line\r"
-            }
-            close $cmd_fd
-            set sent_commands 1
-          }
-          exp_continue
-        }
-        eof
-      }
-      lassign [wait] pid spawn_id os_error status
-      exit $status
-    ' "$commands_file" "$sftp_password_file" "$user@$host" "${sftp_opts_array[@]}" > "$stdout_file" 2> "$stderr_file"; then
+    askpass_script="$tmpdir/ssh_askpass.sh"
+    cat > "$askpass_script" <<'EOF'
+#!/usr/bin/env bash
+cat "$RDS_SFTP_PASSWORD_FILE"
+EOF
+    chmod 700 "$askpass_script"
+    if env \
+      DISPLAY='ssh-askpass:0' \
+      SSH_ASKPASS="$askpass_script" \
+      SSH_ASKPASS_REQUIRE=force \
+      RDS_SFTP_PASSWORD_FILE="$sftp_password_file" \
+      sftp \
+      "${sftp_opts_array[@]}" \
+      -o PreferredAuthentications=password \
+      -o PubkeyAuthentication=no \
+      -o NumberOfPasswordPrompts=1 \
+      "$user@$host" < "$commands_file" > "$stdout_file" 2> "$stderr_file"; then
       sftp_status=0
     else
       sftp_status=$?

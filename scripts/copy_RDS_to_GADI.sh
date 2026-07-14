@@ -128,7 +128,7 @@ resolve_expect_bin() {
       return 0
     fi
     echo "RDS_EXPECT_BIN is not executable: $RDS_EXPECT_BIN" >&2
-    return 1
+    echo "Falling back to auto-detection for expect." >&2
   fi
 
   candidate="$(command -v expect 2>/dev/null || true)"
@@ -145,7 +145,8 @@ resolve_expect_bin() {
   done
 
   echo "Password auth requires expect, but it was not found in PATH and no fallback path was found." >&2
-  echo "Set RDS_EXPECT_BIN explicitly, for example: export RDS_EXPECT_BIN=/usr/bin/expect" >&2
+  echo "Set RDS_EXPECT_BIN explicitly to the real Gadi path, for example:" >&2
+  echo "  export RDS_EXPECT_BIN=\$(command -v expect)" >&2
   return 1
 }
 

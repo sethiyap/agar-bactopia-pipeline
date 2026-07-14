@@ -118,7 +118,7 @@ and removes that file after the PBS job finishes.
 If the PBS job says `expect` is not on `PATH`, set:
 
 ```bash
-export RDS_EXPECT_BIN=/usr/bin/expect
+export RDS_EXPECT_BIN=$(command -v expect)
 ```
 
 Useful notes:
@@ -376,7 +376,7 @@ mkdir -p "$DEBUG_LOG_DIR" "$RDS_UPLOAD_MANIFEST_DIR"
 If the PBS job says `expect` is not on `PATH`, add:
 
 ```bash
-export RDS_EXPECT_BIN=/usr/bin/expect
+export RDS_EXPECT_BIN=$(command -v expect)
 ```
 
 Copy only the main deliverables first:

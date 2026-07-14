@@ -290,7 +290,8 @@ EOF
       RDS_SFTP_PASSWORD_FILE="$RDS_SFTP_PASSWORD_FILE" \
       sftp \
       "${sftp_opts_array[@]}" \
-      -o PreferredAuthentications=password \
+      -o PreferredAuthentications=keyboard-interactive,password \
+      -o KbdInteractiveAuthentication=yes \
       -o PubkeyAuthentication=no \
       -o NumberOfPasswordPrompts=1 \
       "${RDS_SFTP_USER}@${RDS_SFTP_HOST}" < "$commands_file" > "$output_file" 2> "$error_file"
@@ -304,11 +305,7 @@ EOF
 }
 
 sftp_error_log_file() {
-  if [[ -n $RDS_SFTP_PASSWORD_FILE ]]; then
-    printf '%s\n' "$1"
-  else
-    printf '%s\n' "$2"
-  fi
+  printf '%s\n' "$2"
 }
 
 show_sftp_auth_hint() {
@@ -328,6 +325,15 @@ SFTP password auth is available for this helper.
 From a login shell, set:
   export RDS_SFTP_USE_PASSWORD=1
 Then rerun ./scripts/copy_RDS_to_GADI.sh ...
+EOF
+}
+
+show_sftp_password_rejected_hint() {
+  cat >&2 <<EOF
+The RDS server rejected the interactive password login.
+This helper now tries keyboard-interactive first and plain password second.
+Check that the RDS username/password are correct. If the same credentials still
+fail, this RDS account likely requires SSH key auth instead of password auth.
 EOF
 }
 
@@ -544,7 +550,7 @@ run_transfer() {
     elif grep -Fqi 'Too many authentication failures' "$auth_error_log"; then
       show_sftp_auth_hint
     elif grep -Fqi 'Permission denied' "$auth_error_log"; then
-      show_sftp_password_hint
+      show_sftp_password_rejected_hint
     elif [[ -n $RDS_SFTP_PASSWORD_FILE ]]; then
       show_sftp_invalid_password_hint
     fi

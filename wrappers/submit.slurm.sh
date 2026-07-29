@@ -5,14 +5,21 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  ./wrappers/submit.slurm.sh RAW_FASTQ_DIR METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
-  ./wrappers/submit.slurm.sh --additional-tools yes RAW_FASTQ_DIR METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
-  ./wrappers/submit.slurm.sh --dry-run RAW_FASTQ_DIR METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
+  ./wrappers/submit.slurm.sh [OPTIONS] INPUT_SOURCE METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
+  ./wrappers/submit.slurm.sh --input-type ont /path/to/ont /path/to/metadata /path/to/results
+  ./wrappers/submit.slurm.sh --input-type assembly /path/to/assemblies /path/to/metadata /path/to/results
+  ./wrappers/submit.slurm.sh --input-type accession /path/to/accessions.txt /path/to/metadata /path/to/results
   ./wrappers/submit.slurm.sh --is-agar-project 0 RAW_FASTQ_DIR METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
   ./wrappers/submit.slurm.sh --site-config config/sites/slurm.local.env RAW_FASTQ_DIR METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
   ./wrappers/submit.slurm.sh --mail-user you@example.org [--mail-options ae] RAW_FASTQ_DIR METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
 
 Options:
+  --input-type TYPE             illumina|ont|assembly|accession; default: illumina
+  --medaka-rounds N             Medaka rounds for ONT input; default: Bactopia default (0)
+  --medaka-model MODEL          Medaka model matching the ONT basecaller model
+  --ont-minlength N             Minimum ONT read length passed to Bactopia
+  --ont-minqual N               Minimum average ONT read quality passed to Bactopia
+  --use-porechop yes|no         Enable or disable Bactopia Porechop for ONT reads
   --dry-run                    Validate config, inputs, and dependencies without submitting jobs
   --is-agar-project auto|1|0   Override AGAR auto-detection for mixed or non-AGAR inputs
 EOF
@@ -26,6 +33,12 @@ is_agar_project_override=
 mail_user_override=
 mail_options_override=
 dry_run=0
+input_type_override=
+medaka_rounds_override=
+medaka_model_override=
+ont_minlength_override=
+ont_minqual_override=
+use_porechop_override=
 
 while [[ $# -gt 0 ]]; do
   case "${1:-}" in
@@ -35,6 +48,30 @@ while [[ $# -gt 0 ]]; do
       ;;
     --additional-tools)
       additional_tools_override=$2
+      shift 2
+      ;;
+    --input-type)
+      input_type_override=$2
+      shift 2
+      ;;
+    --medaka-rounds)
+      medaka_rounds_override=$2
+      shift 2
+      ;;
+    --medaka-model)
+      medaka_model_override=$2
+      shift 2
+      ;;
+    --ont-minlength)
+      ont_minlength_override=$2
+      shift 2
+      ;;
+    --ont-minqual)
+      ont_minqual_override=$2
+      shift 2
+      ;;
+    --use-porechop)
+      use_porechop_override=$2
       shift 2
       ;;
     --is-agar-project)
@@ -110,6 +147,39 @@ case "${is_agar_project_override:-}" in
   "") ;;
   *)
     echo "--is-agar-project must be auto|1|0" >&2
+    exit 1
+    ;;
+esac
+
+resolved_input_type=${input_type_override:-${INPUT_TYPE:-illumina}}
+resolved_input_type=$(printf '%s' "$resolved_input_type" | tr '[:upper:]' '[:lower:]')
+[[ $resolved_input_type == "accessions" ]] && resolved_input_type=accession
+case "$resolved_input_type" in
+  illumina|ont|assembly|accession) export INPUT_TYPE=$resolved_input_type ;;
+  *)
+    echo "--input-type must be illumina|ont|assembly|accession" >&2
+    exit 1
+    ;;
+esac
+
+for numeric_option in "${medaka_rounds_override:-}" "${ont_minlength_override:-}" "${ont_minqual_override:-}"; do
+  if [[ -n $numeric_option && ! $numeric_option =~ ^[0-9]+$ ]]; then
+    echo "ONT numeric options must be non-negative integers: $numeric_option" >&2
+    exit 1
+  fi
+done
+
+[[ -n $medaka_rounds_override ]] && export MEDAKA_ROUNDS=$medaka_rounds_override
+[[ -n $medaka_model_override ]] && export MEDAKA_MODEL=$medaka_model_override
+[[ -n $ont_minlength_override ]] && export ONT_MINLENGTH=$ont_minlength_override
+[[ -n $ont_minqual_override ]] && export ONT_MINQUAL=$ont_minqual_override
+
+case "${use_porechop_override:-}" in
+  yes|YES|true|TRUE|1) export USE_PORECHOP=1 ;;
+  no|NO|false|FALSE|0) export USE_PORECHOP=0 ;;
+  "") ;;
+  *)
+    echo "--use-porechop must be yes|no|1|0" >&2
     exit 1
     ;;
 esac

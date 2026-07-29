@@ -5,9 +5,10 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  ./scripts/submit_agar_full_pipeline.sh RAW_FASTQ_DIR METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
-  ./scripts/submit_agar_full_pipeline.sh --config scripts/gadi_pipeline.env RAW_FASTQ_DIR METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
-  ./scripts/submit_agar_full_pipeline.sh --dry-run RAW_FASTQ_DIR METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
+  ./scripts/submit_agar_full_pipeline.sh [OPTIONS] INPUT_SOURCE METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
+  ./scripts/submit_agar_full_pipeline.sh --input-type ont /path/to/ont /path/to/metadata /path/to/results
+  ./scripts/submit_agar_full_pipeline.sh --input-type assembly /path/to/assemblies /path/to/metadata /path/to/results
+  ./scripts/submit_agar_full_pipeline.sh --input-type accession /path/to/accessions.txt /path/to/metadata /path/to/results
 
 Example:
   ./scripts/submit_agar_full_pipeline.sh \
@@ -26,7 +27,8 @@ What this script does:
      main post-processing chain finishes
 
 Inputs:
-  RAW_FASTQ_DIR  Raw FASTQ directory, for example /scratch/rg42/AGAR/rawdata/2025/B05
+  INPUT_SOURCE   Directory for illumina, ont, or assembly input; a one-accession-per-line
+                 file for accession input
   METADATA_DIR   Metadata directory containing *_samplesheet.txt and/or samplesheet.fofn
                  The mapper prefers 'Sample name' and 'Comments' headers.
                  If they are missing, the first metadata column is treated as
@@ -37,18 +39,29 @@ Inputs:
                  Gadi and makes reruns smaller if a single batch fails.
 
 Environment variables:
+  INPUT_TYPE             illumina|ont|assembly|accession; default: illumina
   PIPELINE_CONFIG        Optional shell env file to source before resolving defaults
   DRY_RUN               Optional validation mode. Use --dry-run or DRY_RUN=1 to
                         check inputs, config, and dependencies without
                         submitting jobs
   RUN_AGAR_DIR           Default: directory above this script
-  SAMPLESHEET_PATH       Default: <METADATA_DIR>/samplesheet.fofn
+  BACTOPIA_PIPELINE      Required existing Bactopia install/source directory.
+                         Gadi default: /g/data/rg42/bactopia/bactopia
+                         Override this for other projects or non-Gadi sites
+  BACTOPIA_VERSION       Optional expected Bactopia version. The launcher first
+                         tries to read the version from BACTOPIA_PIPELINE, then
+                         uses this value as a fallback for submission logging
+  SAMPLESHEET_PATH       Optional explicit Bactopia input manifest. Defaults to
+                         samplesheet.fofn for Illumina, samplesheet.<type>.fofn
+                         for ONT/assembly, and INPUT_SOURCE for accessions
   AGRF_SHEET_PATH        Optional explicit metadata sheet path. Default: first <METADATA_DIR>/*_samplesheet.txt match
   BATCH_PREFIX           Default: batch_bactopia
   BATCH_DIR              Default: <METADATA_DIR>/batches
-  CREATE_FOFN_SCRIPT     Default: <script_dir>/2_create_fofn_bactopia.sh
+  CREATE_FOFN_SCRIPT     Legacy Illumina-only generator override
+  CREATE_INPUT_SCRIPT    Default: <script_dir>/create_bactopia_input.sh
   CREATE_FOFN_COMMAND    Optional shell command template to create the FOFN
-                         Supported placeholders: {RAWDATA_DIR} {METADATA_DIR} {SAMPLESHEET_OUT}
+                         Supported placeholders: {INPUT_SOURCE} {RAWDATA_DIR}
+                         {METADATA_DIR} {SAMPLESHEET_OUT}
   IS_AGAR_PROJECT        Default: auto. Set to 1 to force AGAR filename normalization,
                          0 to skip it for non-AGAR projects
   AGAR_SAMPLE_REGEX      Default in AGAR mode: ^[0-9]{2}GNB-[0-9]+R?$
@@ -58,6 +71,11 @@ Environment variables:
                          and only run consolidation, mapping, review, and workbook export
   SKIP_NORMALIZE         Set to 1 to skip FASTQ name normalization
   SKIP_VALIDATE          Set to 1 to skip FOFN validation
+  MEDAKA_ROUNDS          Optional Medaka rounds for ONT input; upstream default is 0
+  MEDAKA_MODEL           Optional model matching the ONT basecaller model
+  ONT_MINLENGTH          Optional minimum ONT read length passed to Bactopia
+  ONT_MINQUAL            Optional minimum average ONT read quality passed to Bactopia
+  USE_PORECHOP           Optional 1 or 0 for ONT adapter removal
   RUN_CONSOLIDATE        Default: 1. Set to 0 in POSTPROCESS_ONLY mode to reuse
                          an existing consolidated directory
   MAP_AGRF_RESULTS       Default: 1. Set to 0 to skip post-consolidation AGRF mapping
@@ -115,6 +133,12 @@ source "$script_dir/lib_scheduler.sh"
 
 pipeline_config=${PIPELINE_CONFIG:-}
 dry_run=${DRY_RUN:-0}
+input_type_override=
+medaka_rounds_override=
+medaka_model_override=
+ont_minlength_override=
+ont_minqual_override=
+use_porechop_override=
 
 while [[ $# -gt 0 ]]; do
   case "${1:-}" in
@@ -130,6 +154,30 @@ while [[ $# -gt 0 ]]; do
     --dry-run)
       dry_run=1
       shift
+      ;;
+    --input-type)
+      input_type_override=$2
+      shift 2
+      ;;
+    --medaka-rounds)
+      medaka_rounds_override=$2
+      shift 2
+      ;;
+    --medaka-model)
+      medaka_model_override=$2
+      shift 2
+      ;;
+    --ont-minlength)
+      ont_minlength_override=$2
+      shift 2
+      ;;
+    --ont-minqual)
+      ont_minqual_override=$2
+      shift 2
+      ;;
+    --use-porechop)
+      use_porechop_override=$2
+      shift 2
       ;;
     --help|-h)
       usage
@@ -164,19 +212,42 @@ if [[ $# -lt 3 || $# -gt 4 ]]; then
   exit 1
 fi
 
-raw_fastq_dir=$1
+input_source=$1
 metadata_dir=$2
 results_root_arg=$3
 batch_size=${4:-50}
+input_type=${input_type_override:-${INPUT_TYPE:-illumina}}
+input_type=$(printf '%s' "$input_type" | tr '[:upper:]' '[:lower:]')
+[[ $input_type == "accessions" ]] && input_type=accession
+medaka_rounds=${medaka_rounds_override:-${MEDAKA_ROUNDS:-}}
+medaka_model=${medaka_model_override:-${MEDAKA_MODEL:-}}
+ont_minlength=${ont_minlength_override:-${ONT_MINLENGTH:-}}
+ont_minqual=${ont_minqual_override:-${ONT_MINQUAL:-}}
+use_porechop=${use_porechop_override:-${USE_PORECHOP:-}}
 
 run_agar_dir=${RUN_AGAR_DIR:-$(cd "$script_dir/.." && pwd)}
 
-samplesheet_path=${SAMPLESHEET_PATH:-$metadata_dir/samplesheet.fofn}
+case "$input_type" in
+  illumina) default_samplesheet_path=$metadata_dir/samplesheet.fofn ;;
+  ont|assembly) default_samplesheet_path=$metadata_dir/samplesheet.${input_type}.fofn ;;
+  accession) default_samplesheet_path=$input_source ;;
+  *)
+    echo "INPUT_TYPE must be illumina|ont|assembly|accession: $input_type" >&2
+    exit 1
+    ;;
+esac
+samplesheet_path=${SAMPLESHEET_PATH:-$default_samplesheet_path}
 agrf_sheet_path=${AGRF_SHEET_PATH:-}
 batch_prefix=${BATCH_PREFIX:-batch_bactopia}
-batch_dir=${BATCH_DIR:-$metadata_dir/batches}
+if [[ $input_type == "illumina" ]]; then
+  default_batch_dir=$metadata_dir/batches
+else
+  default_batch_dir=$metadata_dir/batches_${input_type}
+fi
+batch_dir=${BATCH_DIR:-$default_batch_dir}
 create_fofn_command=${CREATE_FOFN_COMMAND:-}
 create_fofn_script=${CREATE_FOFN_SCRIPT:-$script_dir/2_create_fofn_bactopia.sh}
+create_input_script=${CREATE_INPUT_SCRIPT:-$script_dir/create_bactopia_input.sh}
 postprocess_only=${POSTPROCESS_ONLY:-0}
 skip_normalize=${SKIP_NORMALIZE:-0}
 skip_validate=${SKIP_VALIDATE:-0}
@@ -206,6 +277,7 @@ submit_script=${SUBMIT_PIPELINE_SCRIPT:-$script_dir/submit_bactopia_batch_pipeli
 split_script=${SPLIT_SAMPLESHEET_SCRIPT:-$script_dir/split_bactopia_samplesheet.sh}
 normalize_script=${NORMALIZE_SCRIPT:-$script_dir/normalize_agar_fastq_sample_names.sh}
 validate_script=${VALIDATE_FOFN_SCRIPT:-$script_dir/validate_bactopia_fofn.sh}
+validate_metadata_script=${VALIDATE_METADATA_SCRIPT:-$script_dir/validate_metadata_samples.py}
 consolidate_pbs_script=${CONSOLIDATE_PBS_SCRIPT:-$script_dir/run_consolidate_batches.pbs}
 consolidate_r_script=${CONSOLIDATE_SCRIPT:-$script_dir/consolidate_bactopia_batches.R}
 map_pbs_script=${MAP_PBS_SCRIPT:-$script_dir/run_map_agrf_samplesheet_results.pbs}
@@ -225,6 +297,7 @@ st131typer_output_dir=${ST131_TYPER_OUTPUT_DIR:-$results_root_arg/$(basename "$r
 export_results_workbook_pbs_script=${EXPORT_RESULTS_WORKBOOK_PBS_SCRIPT:-$script_dir/run_export_bactopia_results_workbook.pbs}
 export_results_workbook_python_bin=${EXPORT_RESULTS_WORKBOOK_PYTHON_BIN:-python3}
 export_results_workbook_script=${EXPORT_RESULTS_WORKBOOK_SCRIPT:-$script_dir/export_bactopia_results_workbook.py}
+metadata_validation_python_bin=${METADATA_VALIDATION_PYTHON_BIN:-python3}
 is_agar_project=${IS_AGAR_PROJECT:-auto}
 default_agar_sample_regex='^[0-9]{2}GNB-[0-9]+R?$'
 agar_sample_regex=${AGAR_SAMPLE_REGEX:-$default_agar_sample_regex}
@@ -243,6 +316,25 @@ log() {
   printf '[%s] [%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1" "$2"
 }
 
+resolve_bactopia_version() {
+  local pipeline_dir=${BACTOPIA_PIPELINE:-}
+  local version_file detected_version
+
+  for version_file in "$pipeline_dir/nextflow.config" "$pipeline_dir/CITATION.cff"; do
+    [[ -f $version_file ]] || continue
+    detected_version=$(
+      sed -nE "s/.*version[[:space:]]*[:=][[:space:]]*['\"]?v?([0-9]+\.[0-9]+\.[0-9]+).*/\1/p" "$version_file" |
+        head -n 1
+    )
+    if [[ -n $detected_version ]]; then
+      printf '%s\n' "$detected_version"
+      return 0
+    fi
+  done
+
+  printf '%s\n' "${BACTOPIA_VERSION:-unknown}"
+}
+
 fail() {
   log "ERROR" "$1"
   exit 1
@@ -258,8 +350,10 @@ trap on_error ERR
 
 resolve_is_agar_project() {
   local setting="${1:-auto}"
+  local normalized_setting
+  normalized_setting=$(printf '%s' "$setting" | tr '[:upper:]' '[:lower:]')
 
-  case "${setting,,}" in
+  case "$normalized_setting" in
     1|true|yes|y|agar)
       return 0
       ;;
@@ -274,7 +368,7 @@ resolve_is_agar_project() {
   esac
 
   local candidate=""
-  for candidate in "$raw_fastq_dir" "$metadata_dir" "$results_root_arg" "${agrf_sheet_path:-}"; do
+  for candidate in "$input_source" "$metadata_dir" "$results_root_arg" "${agrf_sheet_path:-}"; do
     [[ -z $candidate ]] && continue
     case "/$candidate/" in
       */AGAR/*|*/PRJ-AGAR/*|*/AGRF_*/*|*/agar_samplesheet.txt/*)
@@ -497,6 +591,9 @@ run_dry_run_validation() {
   dry_run_check_file "submit_bactopia_batch_pipeline.sh" "$submit_script"
   dry_run_check_file "split_bactopia_samplesheet.sh" "$split_script"
   dry_run_check_file "validate_bactopia_fofn.sh" "$validate_script"
+  dry_run_check_file "create_bactopia_input.sh" "$create_input_script"
+  dry_run_check_file "validate_metadata_samples.py" "$validate_metadata_script"
+  dry_run_check_command "$metadata_validation_python_bin" "Metadata validation Python interpreter"
   dry_run_check_file "run_consolidate_batches.pbs/slurm wrapper" "$(scheduler_resolve_script "$consolidate_pbs_script")"
   dry_run_check_file "consolidate_bactopia_batches.R" "$consolidate_r_script"
   dry_run_check_file "run_map_agrf_samplesheet_results.pbs/slurm wrapper" "$(scheduler_resolve_script "$map_pbs_script")"
@@ -504,7 +601,13 @@ run_dry_run_validation() {
 
   if [[ $postprocess_only != 1 ]]; then
     dry_run_check_path "BACTOPIA_PIPELINE" "$BACTOPIA_PIPELINE"
-    dry_run_check_path "DATASETS_CACHE" "$DATASETS_CACHE"
+    # DATASETS_CACHE must point at a real datasets cache before a run. It is not
+    # bundled in the repo; fail early with guidance to set it up.
+    if [[ -n ${DATASETS_CACHE:-} && -e $DATASETS_CACHE ]]; then
+      dry_run_pass "DATASETS_CACHE found: $DATASETS_CACHE"
+    else
+      dry_run_fail "DATASETS_CACHE not found: ${DATASETS_CACHE:-<unset>}. Please set up the Bactopia datasets cache before running: download it with scripts/download_bactopia_datasets.sh (from the GitHub release), or point DATASETS_CACHE at an existing cache. See docs/bactopia-setup.md."
+    fi
     dry_run_check_file "NEXTFLOW_CONFIG" "$NEXTFLOW_CONFIG"
     dry_run_check_parent_writable "SING_CACHE" "$SING_CACHE"
   fi
@@ -574,11 +677,11 @@ run_dry_run_validation() {
     dry_run_check_file "ST131Typer.sh" "$st131typer_script"
   fi
 
-  if [[ $postprocess_only != 1 && $skip_normalize != 1 && $is_agar_project == 1 ]]; then
-    if bash "$normalize_script" --dry-run "$raw_fastq_dir" >/dev/null 2>&1; then
+  if [[ $postprocess_only != 1 && $input_type == "illumina" && $skip_normalize != 1 && $is_agar_project == 1 ]]; then
+    if bash "$normalize_script" --dry-run "$input_source" >/dev/null 2>&1; then
       dry_run_pass "AGAR filename normalization dry run completed successfully"
     else
-      dry_run_fail "AGAR filename normalization dry run failed for: $raw_fastq_dir"
+      dry_run_fail "AGAR filename normalization dry run failed for: $input_source"
     fi
   fi
 
@@ -587,48 +690,56 @@ run_dry_run_validation() {
   else
     if [[ -f $samplesheet_path ]]; then
       active_samplesheet=$samplesheet_path
-      if bash "$validate_script" "$active_samplesheet" >/dev/null 2>&1; then
-        dry_run_pass "Existing samplesheet/FOFN validated: $active_samplesheet"
+      if bash "$validate_script" "$active_samplesheet" "$input_type" >/dev/null 2>&1; then
+        dry_run_pass "Existing ${input_type} input manifest validated: $active_samplesheet"
       else
-        dry_run_fail "Existing samplesheet/FOFN failed validation: $active_samplesheet"
+        dry_run_fail "Existing ${input_type} input manifest failed validation: $active_samplesheet"
       fi
     elif [[ -n $create_fofn_command ]]; then
       dry_run_warn "CREATE_FOFN_COMMAND is set. Dry run did not execute this custom command automatically."
-    elif [[ -f $create_fofn_script ]]; then
+    elif [[ $input_type != "accession" && -f $create_input_script ]]; then
       tmp_root=$(mktemp -d)
       tmp_samplesheet=$tmp_root/samplesheet.fofn
-      if [[ $is_agar_project == 1 ]]; then
-        if INCLUDE_SAMPLE_REGEX="$agar_sample_regex" bash "$create_fofn_script" "$raw_fastq_dir" "$tmp_samplesheet" >/dev/null 2>&1; then
-          dry_run_pass "FOFN creation dry run succeeded with AGAR sample filtering"
+      if [[ $input_type == "illumina" && $is_agar_project == 1 ]]; then
+        if INCLUDE_SAMPLE_REGEX="$agar_sample_regex" CREATE_FOFN_SCRIPT="$create_fofn_script" bash "$create_input_script" "$input_type" "$input_source" "$tmp_samplesheet" >/dev/null 2>&1; then
+          dry_run_pass "Illumina FOFN creation dry run succeeded with AGAR sample filtering"
           active_samplesheet=$tmp_samplesheet
         else
-          dry_run_fail "FOFN creation dry run failed using CREATE_FOFN_SCRIPT"
+          dry_run_fail "Illumina FOFN creation dry run failed using CREATE_INPUT_SCRIPT"
         fi
       else
-        if bash "$create_fofn_script" "$raw_fastq_dir" "$tmp_samplesheet" >/dev/null 2>&1; then
-          dry_run_pass "FOFN creation dry run succeeded"
+        if CREATE_FOFN_SCRIPT="$create_fofn_script" bash "$create_input_script" "$input_type" "$input_source" "$tmp_samplesheet" >/dev/null 2>&1; then
+          dry_run_pass "${input_type} manifest creation dry run succeeded"
           active_samplesheet=$tmp_samplesheet
         else
-          dry_run_fail "FOFN creation dry run failed using CREATE_FOFN_SCRIPT"
+          dry_run_fail "${input_type} manifest creation dry run failed using CREATE_INPUT_SCRIPT"
         fi
       fi
 
       if [[ -n $active_samplesheet && -f $active_samplesheet ]]; then
-        if bash "$validate_script" "$active_samplesheet" >/dev/null 2>&1; then
-          dry_run_pass "Generated dry-run FOFN validated successfully"
+        if bash "$validate_script" "$active_samplesheet" "$input_type" >/dev/null 2>&1; then
+          dry_run_pass "Generated dry-run ${input_type} manifest validated successfully"
         else
-          dry_run_fail "Generated dry-run FOFN failed validation"
+          dry_run_fail "Generated dry-run ${input_type} manifest failed validation"
         fi
       fi
     else
-      dry_run_fail "No existing samplesheet/FOFN was found and no FOFN creation helper is available"
+      dry_run_fail "No existing ${input_type} input manifest was found and no applicable creation helper is available"
+    fi
+
+    if [[ -n $active_samplesheet && -f $active_samplesheet ]]; then
+      if "$metadata_validation_python_bin" "$validate_metadata_script" --input "$active_samplesheet" --input-type "$input_type" --metadata "$agrf_sheet_path" >/dev/null 2>&1; then
+        dry_run_pass "Required metadata sheet covers all ${input_type} inputs"
+      else
+        dry_run_fail "Metadata sample names do not cover all ${input_type} inputs"
+      fi
     fi
 
     if [[ -n $active_samplesheet && -f $active_samplesheet && -f $split_script ]]; then
       [[ -z $tmp_root ]] && tmp_root=$(mktemp -d)
       tmp_batch_dir=$tmp_root/batches
       if bash "$split_script" "$active_samplesheet" "$batch_size" "$tmp_batch_dir" "$batch_prefix" >/dev/null 2>&1; then
-        batch_count=$(find "$tmp_batch_dir" -maxdepth 1 -type f -name "${batch_prefix}_*.fofn" | wc -l | tr -d ' ')
+        batch_count=$(find "$tmp_batch_dir" -maxdepth 1 -type f -name "${batch_prefix}_*.*" | wc -l | tr -d ' ')
         dry_run_pass "Batch split dry run succeeded and would create ${batch_count} batch file(s)"
       else
         dry_run_fail "Batch split dry run failed for samplesheet: $active_samplesheet"
@@ -880,6 +991,7 @@ if [[ -z $agrf_sheet_path ]]; then
 fi
 
 metadata_output_prefix=$(metadata_output_stem "$agrf_sheet_path")
+bactopia_version=$(resolve_bactopia_version)
 if [[ -z $map_output ]]; then
   map_output=$results_root_arg/${metadata_output_prefix}_with_results.tsv
 fi
@@ -888,16 +1000,24 @@ if [[ -z $post_review_map_output ]]; then
 fi
 
 log "INFO" "Pipeline log file: $log_file"
-log "INFO" "RAW_FASTQ_DIR=$raw_fastq_dir"
+log "INFO" "BACTOPIA_PIPELINE=${BACTOPIA_PIPELINE:-unknown}"
+log "INFO" "BACTOPIA_VERSION=$bactopia_version"
+log "INFO" "INPUT_TYPE=$input_type"
+log "INFO" "INPUT_SOURCE=$input_source"
 log "INFO" "METADATA_DIR=$metadata_dir"
 log "INFO" "RESULTS_ROOT=$results_root_arg"
 log "INFO" "SAMPLESHEET_PATH=$samplesheet_path"
 log "INFO" "METADATA_SHEET_PATH=$agrf_sheet_path"
 log "INFO" "RESULTS_PREFIX=$metadata_output_prefix"
 
-if [[ ! -d $raw_fastq_dir ]]; then
-  fail "RAW_FASTQ_DIR not found: $raw_fastq_dir"
-fi
+case "$input_type" in
+  illumina|ont|assembly)
+    [[ -d $input_source ]] || fail "Input directory not found for ${input_type}: $input_source"
+    ;;
+  accession)
+    [[ -f $input_source ]] || fail "Accession file not found: $input_source"
+    ;;
+esac
 
 if [[ ! -d $metadata_dir ]]; then
   fail "METADATA_DIR not found: $metadata_dir"
@@ -907,11 +1027,26 @@ if ! [[ $batch_size =~ ^[1-9][0-9]*$ ]]; then
   fail "BATCH_SIZE must be a positive integer: $batch_size"
 fi
 
-for path in "$submit_script" "$split_script" "$normalize_script" "$validate_script" "$consolidate_pbs_script" "$consolidate_r_script" "$map_pbs_script" "$map_r_script" "$review_mlst_pbs_script"; do
+for path in "$submit_script" "$split_script" "$normalize_script" "$validate_script" "$validate_metadata_script" "$create_input_script" "$consolidate_pbs_script" "$consolidate_r_script" "$map_pbs_script" "$map_r_script" "$review_mlst_pbs_script"; do
   if [[ ! -f $path ]]; then
     fail "Required script not found: $path"
   fi
 done
+
+for value in "$medaka_rounds" "$ont_minlength" "$ont_minqual"; do
+  if [[ -n $value && ! $value =~ ^[0-9]+$ ]]; then
+    fail "ONT numeric options must be non-negative integers: $value"
+  fi
+done
+if [[ -n $use_porechop && $use_porechop != 0 && $use_porechop != 1 ]]; then
+  fail "USE_PORECHOP must be 0 or 1: $use_porechop"
+fi
+if [[ $input_type != "ont" && ( -n $medaka_rounds || -n $medaka_model || -n $ont_minlength || -n $ont_minqual || -n $use_porechop ) ]]; then
+  fail "Medaka and ONT QC options can only be used with INPUT_TYPE=ont"
+fi
+if [[ -n $medaka_rounds ]] && (( medaka_rounds > 0 )) && [[ -z $medaka_model ]]; then
+  fail "MEDAKA_MODEL is required when MEDAKA_ROUNDS is greater than 0"
+fi
 
 if [[ $run_export_results_workbook == 1 ]]; then
   for path in "$export_results_workbook_pbs_script" "$export_results_workbook_script"; do
@@ -970,14 +1105,28 @@ if [[ $use_existing_st131typer == 1 && $run_st131typer != 1 ]]; then
 fi
 
 if [[ $postprocess_only != 1 ]]; then
-  current_step="checking raw FASTQ inputs"
-  fastq_count=$(find "$raw_fastq_dir" -maxdepth 1 -type f \( -name "*.fastq.gz" -o -name "*.fq.gz" \) | wc -l | tr -d ' ')
-  if [[ $fastq_count -eq 0 ]]; then
-    fail "No FASTQ files were found in RAW_FASTQ_DIR: $raw_fastq_dir"
-  fi
-  log "INFO" "Detected $fastq_count FASTQ files in raw data directory"
+  current_step="checking ${input_type} inputs"
+  case "$input_type" in
+    illumina)
+      input_count=$(find "$input_source" -maxdepth 1 -type f \( -name "*_R1.fastq.gz" -o -name "*_R1.fq.gz" \) | wc -l | tr -d ' ')
+      [[ $input_count -gt 0 ]] || fail "No paired-end R1 FASTQ files were found in: $input_source"
+      ;;
+    ont)
+      input_count=$(find "$input_source" -maxdepth 1 -type f \( -name "*.fastq.gz" -o -name "*.fq.gz" \) | wc -l | tr -d ' ')
+      [[ $input_count -gt 0 ]] || fail "No compressed ONT FASTQ files were found in: $input_source"
+      ;;
+    assembly)
+      input_count=$(find "$input_source" -maxdepth 1 -type f \( -name "*.fasta.gz" -o -name "*.fna.gz" -o -name "*.fa.gz" \) | wc -l | tr -d ' ')
+      [[ $input_count -gt 0 ]] || fail "No compressed assembly FASTA files were found in: $input_source"
+      ;;
+    accession)
+      input_count=$(awk 'NF {count++} END {print count + 0}' "$input_source")
+      [[ $input_count -gt 0 ]] || fail "Accession file contains no accessions: $input_source"
+      ;;
+  esac
+  log "INFO" "Detected $input_count ${input_type} input record(s)"
 else
-  log "INFO" "POSTPROCESS_ONLY=1. FASTQ checks, FOFN creation, validation, and batch submission will be skipped."
+  log "INFO" "POSTPROCESS_ONLY=1. Input checks, manifest creation, validation, and batch submission will be skipped."
 fi
 
 current_step="checking metadata inputs"
@@ -988,7 +1137,11 @@ log "INFO" "Detected metadata samplesheet: $agrf_sheet_path"
 
 if resolve_is_agar_project "$is_agar_project"; then
   is_agar_project=1
-  log "INFO" "Project detection: AGAR. FASTQ filename normalization is enabled."
+  if [[ $input_type == "illumina" ]]; then
+    log "INFO" "Project detection: AGAR. Illumina FASTQ filename normalization is enabled."
+  else
+    log "INFO" "Project detection: AGAR. Filename normalization is not applied to ${input_type} input."
+  fi
 else
   is_agar_project=0
   log "INFO" "Project detection: non-AGAR. FASTQ filename normalization will be skipped."
@@ -1004,14 +1157,14 @@ fi
 
 if [[ $postprocess_only == 1 ]]; then
   log "INFO" "Skipping FASTQ sample name normalization in POSTPROCESS_ONLY mode"
-elif [[ $skip_normalize != 1 && $is_agar_project == 1 ]]; then
+elif [[ $input_type == "illumina" && $skip_normalize != 1 && $is_agar_project == 1 ]]; then
   current_step="normalizing FASTQ sample names"
-  log "INFO" "Normalizing FASTQ sample names in: $raw_fastq_dir"
-  bash "$normalize_script" "$raw_fastq_dir"
+  log "INFO" "Normalizing FASTQ sample names in: $input_source"
+  bash "$normalize_script" "$input_source"
 elif [[ $skip_normalize == 1 ]]; then
   log "INFO" "Skipping FASTQ sample name normalization because SKIP_NORMALIZE=1"
 else
-  log "INFO" "Skipping FASTQ sample name normalization for non-AGAR project input"
+  log "INFO" "Skipping filename normalization for ${input_type} input"
 fi
 
 if [[ $postprocess_only == 1 ]]; then
@@ -1019,7 +1172,8 @@ if [[ $postprocess_only == 1 ]]; then
 elif [[ -n $create_fofn_command ]]; then
   current_step="creating Bactopia FOFN with CREATE_FOFN_COMMAND"
   mkdir -p "$(dirname "$samplesheet_path")"
-  fofn_cmd=${create_fofn_command//\{RAWDATA_DIR\}/$raw_fastq_dir}
+  fofn_cmd=${create_fofn_command//\{INPUT_SOURCE\}/$input_source}
+  fofn_cmd=${fofn_cmd//\{RAWDATA_DIR\}/$input_source}
   fofn_cmd=${fofn_cmd//\{METADATA_DIR\}/$metadata_dir}
   fofn_cmd=${fofn_cmd//\{SAMPLESHEET_OUT\}/$samplesheet_path}
   if [[ $is_agar_project == 1 ]]; then
@@ -1027,26 +1181,30 @@ elif [[ -n $create_fofn_command ]]; then
   fi
   log "INFO" "Creating Bactopia samplesheet/FOFN: $samplesheet_path"
   eval "$fofn_cmd"
-elif [[ ! -f $samplesheet_path && -f $create_fofn_script ]]; then
-  current_step="creating Bactopia FOFN with CREATE_FOFN_SCRIPT"
+elif [[ $input_type != "accession" && ! -f $samplesheet_path && -f $create_input_script ]]; then
+  current_step="creating Bactopia ${input_type} manifest with CREATE_INPUT_SCRIPT"
   mkdir -p "$(dirname "$samplesheet_path")"
-  log "INFO" "Creating Bactopia samplesheet/FOFN with: $create_fofn_script"
-  if [[ $is_agar_project == 1 ]]; then
+  log "INFO" "Creating Bactopia ${input_type} manifest with: $create_input_script"
+  if [[ $input_type == "illumina" && $is_agar_project == 1 ]]; then
     log "INFO" "AGAR mode FOFN filter: keeping sample prefixes matching AGAR_SAMPLE_REGEX=$agar_sample_regex"
-    INCLUDE_SAMPLE_REGEX="$agar_sample_regex" bash "$create_fofn_script" "$raw_fastq_dir" "$samplesheet_path"
+    INCLUDE_SAMPLE_REGEX="$agar_sample_regex" CREATE_FOFN_SCRIPT="$create_fofn_script" bash "$create_input_script" "$input_type" "$input_source" "$samplesheet_path"
   else
-    bash "$create_fofn_script" "$raw_fastq_dir" "$samplesheet_path"
+    CREATE_FOFN_SCRIPT="$create_fofn_script" bash "$create_input_script" "$input_type" "$input_source" "$samplesheet_path"
   fi
 fi
 
 if [[ $postprocess_only != 1 && ! -f $samplesheet_path ]]; then
-  fail "Samplesheet/FOFN not found: $samplesheet_path. Either create it first or provide CREATE_FOFN_COMMAND / CREATE_FOFN_SCRIPT."
+  fail "Bactopia ${input_type} input manifest not found: $samplesheet_path"
 fi
 
 if [[ $postprocess_only != 1 && $skip_validate != 1 ]]; then
-  current_step="validating FOFN"
-  log "INFO" "Validating FOFN: $samplesheet_path"
-  bash "$validate_script" "$samplesheet_path"
+  current_step="validating Bactopia input and metadata coverage"
+  log "INFO" "Validating ${input_type} input manifest: $samplesheet_path"
+  bash "$validate_script" "$samplesheet_path" "$input_type"
+  "$metadata_validation_python_bin" "$validate_metadata_script" \
+    --input "$samplesheet_path" \
+    --input-type "$input_type" \
+    --metadata "$agrf_sheet_path"
 fi
 
 current_step="preparing batch submission"
@@ -1055,6 +1213,12 @@ mkdir -p "$batch_dir"
 export RESULTS_ROOT=${RESULTS_ROOT:-$results_root_arg}
 export BATCH_DIR="$batch_dir"
 export BATCH_PREFIX="$batch_prefix"
+export BACTOPIA_INPUT_MODE="$input_type"
+export MEDAKA_ROUNDS="$medaka_rounds"
+export MEDAKA_MODEL="$medaka_model"
+export ONT_MINLENGTH="$ont_minlength"
+export ONT_MINQUAL="$ont_minqual"
+export USE_PORECHOP="$use_porechop"
 export PBS_LOG_DIR=${PBS_LOG_DIR:-}
 export PBS_MAIL_OPTIONS=${PBS_MAIL_OPTIONS:-}
 export PBS_MAIL_USER=${PBS_MAIL_USER:-}

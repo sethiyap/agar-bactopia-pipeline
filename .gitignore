@@ -1,2 +1,7 @@
 .DS_Store
 config/sites/*.local.env
+
+# Bactopia datasets cache: distributed as a GitHub Release asset, not via git
+# (contains files >100MB that GitHub would reject). See docs/bactopia-setup.md.
+bactopia_datasets_custom/
+agar_bactopia_datasets.tar.gz

@@ -58,6 +58,12 @@ Environment variables:
   PBS_LOG_DIR             Optional directory for scheduler stdout/stderr files
   PBS_MAIL_OPTIONS        Optional PBS-style mail flags, for example ae or abe
   PBS_MAIL_USER           Optional email address for scheduler notifications
+  BACTOPIA_INPUT_MODE     illumina|ont|assembly|accession; default: illumina
+  MEDAKA_ROUNDS           Optional Medaka rounds for ONT input
+  MEDAKA_MODEL            Optional model matching the ONT basecaller model
+  ONT_MINLENGTH           Optional minimum ONT read length
+  ONT_MINQUAL             Optional minimum average ONT read quality
+  USE_PORECHOP            Optional 1 or 0 for ONT adapter removal
 
 Example:
   BATCH_SKIP=0 \
@@ -148,6 +154,12 @@ KLEBORATE_COMPAT_SCRIPT=${KLEBORATE_COMPAT_SCRIPT:-$script_dir/kleborate_232_com
 PBS_LOG_DIR=${PBS_LOG_DIR:-}
 PBS_MAIL_OPTIONS=${PBS_MAIL_OPTIONS:-}
 PBS_MAIL_USER=${PBS_MAIL_USER:-}
+BACTOPIA_INPUT_MODE=${BACTOPIA_INPUT_MODE:-illumina}
+MEDAKA_ROUNDS=${MEDAKA_ROUNDS:-}
+MEDAKA_MODEL=${MEDAKA_MODEL:-}
+ONT_MINLENGTH=${ONT_MINLENGTH:-}
+ONT_MINQUAL=${ONT_MINQUAL:-}
+USE_PORECHOP=${USE_PORECHOP:-}
 
 if [[ ! -f $input_file ]]; then
   echo "Input file not found: $input_file" >&2
@@ -158,6 +170,14 @@ if ! [[ $batch_size =~ ^[1-9][0-9]*$ ]]; then
   echo "BATCH_SIZE must be a positive integer: $batch_size" >&2
   exit 1
 fi
+
+case "$BACTOPIA_INPUT_MODE" in
+  illumina|ont|assembly|accession) ;;
+  *)
+    echo "BACTOPIA_INPUT_MODE must be illumina|ont|assembly|accession: $BACTOPIA_INPUT_MODE" >&2
+    exit 1
+    ;;
+esac
 
 if ! [[ $BATCH_SKIP =~ ^[0-9]+$ ]]; then
   echo "BATCH_SKIP must be a non-negative integer: $BATCH_SKIP" >&2
@@ -264,6 +284,7 @@ if [[ -n $BATCH_IDS ]]; then
     batch_base=$(basename "$batch_file" .csv)
     batch_base=${batch_base%.fofn}
     batch_base=${batch_base%.tsv}
+    batch_base=${batch_base%.txt}
     batch_id=${batch_base##*_}
     run_label=${BATCH_PREFIX}_${batch_id}
 
@@ -314,6 +335,7 @@ for batch_file in "${selected_batch_files[@]}"; do
   batch_base=$(basename "$batch_file" .csv)
   batch_base=${batch_base%.fofn}
   batch_base=${batch_base%.tsv}
+  batch_base=${batch_base%.txt}
   batch_id=${batch_base##*_}
   run_label=${BATCH_PREFIX}_${batch_id}
   results_main=${RESULTS_ROOT}/${run_label}/results_main
@@ -333,7 +355,7 @@ for batch_file in "${selected_batch_files[@]}"; do
   assembly_job=$(scheduler_submit \
     "$assembly_job_name" \
     "$assembly_dependency" \
-    "BASE_DIR=${BASE_DIR},SAMPLESHEET_DIR=${SAMPLESHEET_DIR},SAMPLESHEET_PREFIX=${BATCH_PREFIX},BATCH_ID=${batch_id},BATCH_INPUT_FILE=${batch_file},RESULTS_ROOT=${RESULTS_ROOT},NEXTFLOW_CONFIG=${NEXTFLOW_CONFIG},BACTOPIA_PIPELINE=${BACTOPIA_PIPELINE},DATASETS_CACHE=${DATASETS_CACHE},SING_CACHE=${SING_CACHE}" \
+    "BASE_DIR=${BASE_DIR},SAMPLESHEET_DIR=${SAMPLESHEET_DIR},SAMPLESHEET_PREFIX=${BATCH_PREFIX},BATCH_ID=${batch_id},BATCH_INPUT_FILE=${batch_file},RESULTS_ROOT=${RESULTS_ROOT},NEXTFLOW_CONFIG=${NEXTFLOW_CONFIG},BACTOPIA_PIPELINE=${BACTOPIA_PIPELINE},DATASETS_CACHE=${DATASETS_CACHE},SING_CACHE=${SING_CACHE},BACTOPIA_INPUT_MODE=${BACTOPIA_INPUT_MODE},MEDAKA_ROUNDS=${MEDAKA_ROUNDS},MEDAKA_MODEL=${MEDAKA_MODEL},ONT_MINLENGTH=${ONT_MINLENGTH},ONT_MINQUAL=${ONT_MINQUAL},USE_PORECHOP=${USE_PORECHOP}" \
     "$script_dir/run_bactopia_batch.pbs" \
     "$PBS_LOG_DIR" \
     "$PBS_MAIL_OPTIONS" \

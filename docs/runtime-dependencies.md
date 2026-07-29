@@ -21,15 +21,27 @@ and helper logic needed to run the AGAR Bactopia workflow.
   - `scripts/nextflow.slurm.all_tools.config`
   - `scripts/kleborate_232_compat.config`
   - `scripts/kleborate_232_compat.sh`
+- `scripts/download_bactopia_datasets.sh`: on-demand custom-datasets downloader
+
+See [bactopia-setup.md](bactopia-setup.md) for installing Bactopia on a new
+system, downloading the custom datasets, and how Kleborate is supplied.
 
 ## External Runtime Dependencies
 
 These are not bundled in the repo and must exist on the execution site.
 
 - Bactopia pipeline install:
-  - `BACTOPIA_PIPELINE`
+  - required; Bactopia is not bundled or installed by this repository
+  - set `BACTOPIA_PIPELINE` to the Bactopia directory containing `main.nf` and
+    `nextflow.config`
+  - the shared Gadi default is `/g/data/rg42/bactopia/bactopia` (Bactopia
+    v3.2.0)
+  - other projects and non-Gadi sites must provide their own path in the site
+    config or through the `BACTOPIA_PIPELINE` environment variable
 - shared Bactopia datasets cache / custom datasets:
   - `DATASETS_CACHE`
+  - download on demand with `scripts/download_bactopia_datasets.sh`; see
+    [bactopia-setup.md](bactopia-setup.md)
 - Kraken2 / Bracken database:
   - `KRAKEN2_DB`
 - FimTyper pipeline:
@@ -56,8 +68,8 @@ These are not bundled in the repo and must exist on the execution site.
 For non-Gadi or non-`rg42` installs, these helpers are not installed by cloning
 this repo. Install them only if they are not already available on the target
 site, then point the wrappers at the correct paths via environment variables
-such as `MINIFORGE_ROOT`, `MLST_ENV`, `ST131_TYPER_DIR`, and
-`ST131_TYPER_SCRIPT`.
+such as `BACTOPIA_PIPELINE`, `MINIFORGE_ROOT`, `MLST_ENV`, `ST131_TYPER_DIR`,
+and `ST131_TYPER_SCRIPT`.
 
 ## MLST Review Workflow
 

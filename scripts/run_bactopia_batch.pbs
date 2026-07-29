@@ -34,6 +34,12 @@ SING_CACHE=${SING_CACHE:-/scratch/${PROJECT}/${USER_NAME}/singularity_cache}
 # Optional Bactopia arguments.
 GENOME_SIZE=${GENOME_SIZE:-5000000}
 EXTRA_ARGS_STRING=${EXTRA_ARGS_STRING:-}
+BACTOPIA_INPUT_MODE=${BACTOPIA_INPUT_MODE:-illumina}
+MEDAKA_ROUNDS=${MEDAKA_ROUNDS:-}
+MEDAKA_MODEL=${MEDAKA_MODEL:-}
+ONT_MINLENGTH=${ONT_MINLENGTH:-}
+ONT_MINQUAL=${ONT_MINQUAL:-}
+USE_PORECHOP=${USE_PORECHOP:-}
 ###############################################################################
 
 RUN_LABEL=${SAMPLESHEET_PREFIX}_${BATCH_ID}
@@ -87,16 +93,53 @@ if [[ -n "${EXTRA_ARGS_STRING}" ]]; then
   EXTRA_ARGS=(${EXTRA_ARGS_STRING})
 fi
 
-nextflow run "$BACTOPIA_PIPELINE" \
-  --samples "$SAMPLESHEET" \
-  --datasets_cache "$DATASETS_CACHE" \
-  --genome_size "$GENOME_SIZE" \
-  --outdir results_main \
-  -profile singularity \
-  -work-dir "$NXF_WORK" \
-  -c "$NEXTFLOW_CONFIG" \
-  -resume \
-  "${EXTRA_ARGS[@]}"
+case "$BACTOPIA_INPUT_MODE" in
+  illumina|ont|assembly)
+    INPUT_ARGS=(--samples "$SAMPLESHEET")
+    ;;
+  accession)
+    INPUT_ARGS=(--accessions "$SAMPLESHEET")
+    ;;
+  *)
+    echo "Unsupported BACTOPIA_INPUT_MODE: $BACTOPIA_INPUT_MODE" >&2
+    exit 1
+    ;;
+esac
+
+ONT_ARGS=()
+if [[ $BACTOPIA_INPUT_MODE == "ont" ]]; then
+  [[ -n $MEDAKA_ROUNDS ]] && ONT_ARGS+=(--medaka_rounds "$MEDAKA_ROUNDS")
+  [[ -n $MEDAKA_MODEL ]] && ONT_ARGS+=(--medaka_model "$MEDAKA_MODEL")
+  [[ -n $ONT_MINLENGTH ]] && ONT_ARGS+=(--ont_minlength "$ONT_MINLENGTH")
+  [[ -n $ONT_MINQUAL ]] && ONT_ARGS+=(--ont_minqual "$ONT_MINQUAL")
+  [[ $USE_PORECHOP == "1" ]] && ONT_ARGS+=(--use_porechop)
+fi
+
+printf 'Bactopia input mode: %s\n' "$BACTOPIA_INPUT_MODE"
+printf 'Bactopia input manifest: %s\n' "$SAMPLESHEET"
+
+BACTOPIA_CMD=(
+  nextflow run "$BACTOPIA_PIPELINE"
+  "${INPUT_ARGS[@]}"
+  --datasets_cache "$DATASETS_CACHE"
+  --genome_size "$GENOME_SIZE"
+  --outdir results_main
+  -profile singularity
+  -work-dir "$NXF_WORK"
+  -c "$NEXTFLOW_CONFIG"
+  -resume
+)
+if [[ ${#ONT_ARGS[@]} -gt 0 ]]; then
+  BACTOPIA_CMD+=("${ONT_ARGS[@]}")
+fi
+if [[ ${#EXTRA_ARGS[@]} -gt 0 ]]; then
+  BACTOPIA_CMD+=("${EXTRA_ARGS[@]}")
+fi
+
+printf 'Bactopia command:'
+printf ' %q' "${BACTOPIA_CMD[@]}"
+printf '\n'
+"${BACTOPIA_CMD[@]}"
 
 rsync -av results_main/ "$RESULTS_OUT/results_main/"
 rsync -av .nextflow.log* "$RESULTS_OUT/" || true

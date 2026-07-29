@@ -5,7 +5,10 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  ./bin/agar-bactopia submit gadi RAW_FASTQ_DIR METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
+  ./bin/agar-bactopia submit gadi [--input-type illumina|ont|assembly|accession] INPUT_SOURCE METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
+  ./bin/agar-bactopia submit gadi --input-type ont --medaka-rounds 1 --medaka-model MODEL INPUT_DIR METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
+  ./bin/agar-bactopia submit gadi --input-type assembly ASSEMBLY_DIR METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
+  ./bin/agar-bactopia submit gadi --input-type accession ACCESSIONS.txt METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
   ./bin/agar-bactopia submit gadi --additional-tools yes RAW_FASTQ_DIR METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
   ./bin/agar-bactopia submit gadi --dry-run RAW_FASTQ_DIR METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
   ./bin/agar-bactopia submit gadi --is-agar-project 0 RAW_FASTQ_DIR METADATA_DIR RESULTS_ROOT [BATCH_SIZE]

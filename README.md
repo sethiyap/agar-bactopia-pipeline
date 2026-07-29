@@ -24,8 +24,8 @@ reference sections come later.
 
 For a normal run, the pipeline:
 
-1. reads FASTQ files from a raw-data folder
-2. creates or reuses `samplesheet.fofn`
+1. accepts paired-end Illumina reads, ONT reads, local assemblies, or accessions
+2. creates or reuses the mode-specific Bactopia input manifest
 3. splits the run into manageable batches
 4. submits Bactopia jobs
 5. consolidates the batch outputs
@@ -36,6 +36,68 @@ For a normal run, the pipeline:
 Compared with plain Bactopia, this repo also includes AGAR-facing workflow
 behaviour such as metadata mapping, MLST review logic, optional FimTyper
 integration, and optional ST131Typer append workflows.
+
+### Bactopia Version Compatibility
+
+An existing Bactopia installation is a prerequisite; Bactopia itself is not
+bundled or installed by this repository. `BACTOPIA_PIPELINE` must point to the
+Bactopia source/install directory containing `main.nf` and `nextflow.config`.
+
+Setting up a new system? See [docs/bactopia-setup.md](docs/bactopia-setup.md)
+for Bactopia install and prerequisites, how to download the custom datasets, and
+how Kleborate is provided.
+
+The shared Gadi pipeline currently uses **Bactopia v3.2.0** from:
+
+```text
+/g/data/rg42/bactopia/bactopia
+```
+
+This version was confirmed from a Bactopia `.nextflow.log`. The Gadi site
+configuration records both `BACTOPIA_PIPELINE` and `BACTOPIA_VERSION`. Every
+new `submit_agar_full_pipeline_<timestamp>.log` also records lines such as:
+
+```text
+BACTOPIA_PIPELINE=/g/data/rg42/bactopia/bactopia
+BACTOPIA_VERSION=3.2.0
+```
+
+The launcher attempts to read the version from the Bactopia checkout's
+`nextflow.config` or `CITATION.cff`; the configured `BACTOPIA_VERSION=3.2.0` is
+used as a fallback. Check the deployed version before changing or upgrading
+the shared installation:
+
+```bash
+cd /g/data/rg42/bactopia/bactopia
+git describe --tags --always
+```
+
+The deployed source corresponds to the
+[Bactopia v3.2.0 release](https://github.com/bactopia/bactopia/releases/tag/v3.2.0).
+Bactopia v4 should not be substituted without updating and retesting this
+wrapper.
+
+For another Gadi project or a non-Gadi installation, provide the appropriate
+path and version in that site's config file:
+
+```bash
+BACTOPIA_PIPELINE=/absolute/path/to/bactopia
+BACTOPIA_VERSION=3.2.0
+```
+
+You can also override them for a single submission without editing the site
+config:
+
+```bash
+BACTOPIA_PIPELINE=/absolute/path/to/bactopia \
+BACTOPIA_VERSION=3.2.0 \
+./bin/agar-bactopia submit slurm \
+  --site-config config/sites/slurm.local.env \
+  INPUT_SOURCE METADATA_DIR RESULTS_ROOT
+```
+
+Use `--dry-run` after changing the path. The launcher checks that
+`BACTOPIA_PIPELINE` exists before submitting jobs.
 
 ## Step-By-Step On Gadi
 
@@ -131,28 +193,47 @@ Useful notes:
 ### 3. Prepare The Metadata Folder
 
 Your metadata directory must contain exactly one `*_samplesheet.txt` unless you
-set `AGRF_SHEET_PATH` explicitly.
+set `AGRF_SHEET_PATH` explicitly. This metadata sheet is mandatory for every
+input type: Illumina, ONT, local assembly, SRA/ENA accession, and NCBI assembly
+accession.
 
-Preferred metadata columns:
+The sheet needs two columns:
 
-- `Sample name`
-- `Comments`
+- **column 1** — the sample identifier, used to join metadata back onto results
+- **column 2** — the organism/phenotype note used by downstream MLST review logic
 
-What those columns mean:
+A minimal tab-delimited `*_samplesheet.txt` looks like this:
 
-- `Sample name` is the identifier used to join metadata back onto the processed results
-- `Comments` is the free-text phenotype or organism note used by downstream review logic
+```text
+Sample name	Organism
+24GNB-1676	Escherichia coli
+24GNB-1737	Escherichia coli
+24GNB-1738	Klebsiella oxytoca
+24GNB-1739	Escherichia coli
+24GNB-1740	Klebsiella pneumoniae
+24GNB-1741	Klebsiella oxytoca
+```
 
-If those headers are missing, the pipeline falls back to:
+The sheet may be tab- or comma-delimited, and the sample name must match the
+FOFN/accession sample exactly. See [docs/input-formats.md](docs/input-formats.md)
+for the full rules and per-input-type FOFN examples.
 
-- first column as `Sample name`
-- second column as `Comments`
+How the columns are read:
+
+- if headers `Sample name` **and** `Comments` are both present, they are used by name
+- otherwise the pipeline falls back to position — first column as the sample
+  name, second column as the organism/phenotype note (so a second column headed
+  `Organism`, as above, is used correctly)
 
 Important behaviour:
 
+- every input sample must occur in the metadata `Sample name` column
+- for accession input, `Sample name` must be the submitted accession
 - for non-AGAR projects, sample names are used as they are
 - for AGAR projects, the launcher can normalize AGAR-style FASTQ names before FOFN creation
 - if `samplesheet.fofn` already exists in `METADATA_DIR`, the launcher reuses it
+- ONT and assembly manifests use `samplesheet.ont.fofn` and
+  `samplesheet.assembly.fofn`, so they cannot silently reuse an Illumina FOFN
 - mapped output files reuse the metadata sheet prefix
 - the prefix comes from the metadata filename before `_samplesheet.txt`
 - for example, `B07_samplesheet.txt` gives the prefix `B07` and produces
@@ -212,6 +293,10 @@ Then review `config/sites/gadi.local.env` and confirm these paths are correct:
 - `MERGE_FIMTYPER_SCRIPT`
 - `SING_CACHE`
 
+If `DATASETS_CACHE` does not exist yet, download the custom datasets with
+`./scripts/download_bactopia_datasets.sh` (reuses an existing cache if present).
+See [docs/bactopia-setup.md](docs/bactopia-setup.md) for details.
+
 ### 6. Submit The Pipeline
 
 Normal Gadi submission:
@@ -230,11 +315,17 @@ Command shape:
 
 ```bash
 /g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
-  [OPTIONS] RAW_FASTQ_DIR METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
+  [OPTIONS] INPUT_SOURCE METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
 ```
 
 Main public options:
 
+- `--input-type illumina|ont|assembly|accession`: select the input contract; default `illumina`
+- `--medaka-rounds N`: enable Medaka polishing for native Bactopia ONT runs
+- `--medaka-model MODEL`: use the model matching the ONT basecaller model
+- `--ont-minlength N`: set Bactopia's minimum ONT read length
+- `--ont-minqual N`: set Bactopia's minimum average ONT read quality
+- `--use-porechop yes|no`: control ONT adapter removal in Bactopia
 - `--additional-tools yes|no`: turn the extra tool bundle on or off
 - `--dry-run`: validate config, inputs, and dependencies without submitting jobs
 - `--is-agar-project auto|1|0`: control AGAR-specific normalization and filtering
@@ -244,8 +335,8 @@ Main public options:
 
 Arguments:
 
-- `RAW_FASTQ_DIR`: folder containing the input FASTQ files
-- `METADATA_DIR`: folder containing the metadata sheet and optionally `samplesheet.fofn`
+- `INPUT_SOURCE`: an input directory for Illumina, ONT, or assemblies; a text file for accessions
+- `METADATA_DIR`: folder containing the required `*_samplesheet.txt` and optional Bactopia manifests
 - `RESULTS_ROOT`: where batch outputs, consolidated outputs, mapped TSVs, and workbook are written
 - `BATCH_SIZE`: optional; if omitted, the config default is used, otherwise `50`
 
@@ -260,9 +351,9 @@ under names such as:
 
 After you submit, the launcher usually does the following in order:
 
-1. validates the raw-data and metadata inputs
-2. creates or reuses `samplesheet.fofn`
-3. splits the FOFN into batch files
+1. validates the selected input type and required metadata
+2. creates or reuses the mode-specific Bactopia input manifest
+3. splits the input manifest into batch files
 4. submits one PBS job per batch
 5. consolidates the batch outputs
 6. maps the consolidated results back to the metadata sheet
@@ -398,6 +489,119 @@ Transfer notes:
 ## Common Variations
 
 These are the most common changes to the standard submission command.
+
+### Submit ONT Reads
+
+Place one compressed ONT FASTQ per sample in the input directory. The filename
+without `.fastq.gz` or `.fq.gz` becomes the sample name and must match `Sample
+name` in the required `*_samplesheet.txt`.
+
+The generated `samplesheet.ont.fofn` is tab-delimited. Empty cells below must
+remain empty fields in the TSV:
+
+| sample | runtype | r1 | r2 | extra |
+| --- | --- | --- | --- | --- |
+| `ONT01` | `ont` | `/absolute/path/ONT01.fastq.gz` | *(empty)* | *(empty)* |
+| `ONT02` | `ont` | `/absolute/path/ONT02.fastq.gz` | *(empty)* | *(empty)* |
+
+For example, this creates the exact tab-delimited file:
+
+```bash
+printf 'sample\truntype\tr1\tr2\textra\nONT01\tont\t/absolute/path/ONT01.fastq.gz\t\t\n' > samplesheet.ont.fofn
+```
+
+The ONT FASTQ path goes in `r1`; `r2` and `extra` are empty. The wrapper creates
+this file automatically from the ONT input directory.
+
+```bash
+/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
+  --input-type ont \
+  --ont-minlength 1000 \
+  --ont-minqual 10 \
+  /scratch/rg42/AGAR/ont/2025/B07 \
+  /scratch/rg42/AGAR/metadata/2025/B07 \
+  /scratch/rg42/AGAR/intermediates/2025/B07_ont \
+  20
+```
+
+Bactopia performs ONT read QC before Dragonflye/Flye assembly. Medaka is not
+enabled by default. To enable one Medaka round, also provide the model used for
+basecalling:
+
+```bash
+/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
+  --input-type ont \
+  --medaka-rounds 1 \
+  --medaka-model '<basecaller-model>' \
+  /scratch/rg42/AGAR/ont/2025/B07 \
+  /scratch/rg42/AGAR/metadata/2025/B07 \
+  /scratch/rg42/AGAR/intermediates/2025/B07_ont \
+  20
+```
+
+If one sample is split across multiple ONT FASTQs, concatenate its chunks into
+one compressed FASTQ before submission. Otherwise each filename is treated as
+a separate sample.
+
+### Submit Local Assemblies
+
+The assembly directory may contain `.fasta.gz`, `.fna.gz`, or `.fa.gz` files.
+The filename without the FASTA extension becomes the sample name.
+
+The generated `samplesheet.assembly.fofn` is tab-delimited:
+
+```text
+sample	runtype	r1	r2	extra
+ASM01	assembly			/absolute/path/ASM01.fasta.gz
+ASM02	assembly			/absolute/path/ASM02.fna.gz
+```
+
+For assembly input, `r1` and `r2` are empty and the compressed FASTA path goes
+in `extra`. The wrapper creates this file automatically from the assembly input
+directory.
+
+```bash
+/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
+  --input-type assembly \
+  /scratch/rg42/AGAR/assemblies/2025/B07 \
+  /scratch/rg42/AGAR/metadata/2025/B07 \
+  /scratch/rg42/AGAR/intermediates/2025/B07_assemblies \
+  50
+```
+
+Bactopia receives these as assembly inputs. It does not run read QC, Flye,
+Racon, or Medaka on them.
+
+### Submit SRA/ENA Or NCBI Assembly Accessions
+
+Create a text file with one accession per line. SRA/ENA read accessions and
+NCBI assembly accessions can be included. Do not add a header or extra columns.
+
+Accessions do **not** use a FOFN. Supply a plain, headerless text file such as
+`B07_accessions.txt`:
+
+```text
+SRR12345678
+ERX1234567
+GCF_000005845.2
+GCA_000006945.2
+```
+
+Each accession must also appear in the metadata `Sample name` column.
+
+```bash
+/g/data/rg42/agar-bactopia-pipeline/bin/agar-bactopia submit gadi \
+  --input-type accession \
+  /scratch/rg42/AGAR/accessions/B07_accessions.txt \
+  /scratch/rg42/AGAR/metadata/2025/B07 \
+  /scratch/rg42/AGAR/intermediates/2025/B07_accessions \
+  20
+```
+
+The launcher splits the list into batches and passes each batch to Bactopia
+with `--accessions`. Network access from the compute job is required for the
+downloads. `--input-type accessions` is also accepted as an alias for
+`--input-type accession`.
 
 ### Validate The Installation Before Submitting
 
@@ -792,5 +996,10 @@ The public options are the same as the Gadi backend:
 - `config/defaults.env`: scheduler-agnostic defaults
 - `config/sites/`: site-specific configuration files
 - `scripts/`: helper scripts and job wrappers
+- `scripts/create_bactopia_input.sh`: builds the ONT/assembly FOFN from an input directory
+- `scripts/validate_metadata_samples.py`: checks every input sample exists in the metadata sheet
+- `scripts/download_bactopia_datasets.sh`: downloads the custom datasets into `DATASETS_CACHE` on demand
+- `docs/bactopia-setup.md`: Bactopia install, custom datasets, and Kleborate setup for new systems
+- `docs/input-formats.md`: metadata sheet and per-input-type FOFN reference
 - `docs/runtime-dependencies.md`: bundled versus external dependency notes
 - `docs/gadi-shared-install-checklist.md`: shared Gadi deployment checklist

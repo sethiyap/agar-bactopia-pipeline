@@ -245,10 +245,19 @@ use placeholder paths; substitute your own (rg42 users: see
 
 ### Submit ONT Reads
 
-Place one compressed ONT FASTQ per sample in the input directory. The filename
-without `.fastq.gz` or `.fq.gz` becomes the sample name and must match `Sample
-name` in the required `*_samplesheet.txt`. The wrapper creates
-`samplesheet.ont.fofn` automatically.
+Place **one concatenated, compressed ONT FASTQ per sample** in the input
+directory. The filename without `.fastq.gz` or `.fq.gz` becomes the sample name
+and must match `Sample name` in the required `*_samplesheet.txt`. The wrapper
+creates `samplesheet.ont.fofn` automatically.
+
+If a sample's reads are split across several FASTQ chunks (e.g. per-barcode
+run folders), **concatenate them into one file yourself before submission** —
+the pipeline does not merge them, and each leftover file would otherwise be
+treated as a separate sample:
+
+```bash
+cat ONT01_part1.fastq.gz ONT01_part2.fastq.gz > ONT01.fastq.gz
+```
 
 ```bash
 ./bin/agar-bactopia submit gadi \
@@ -276,9 +285,8 @@ model:
   20
 ```
 
-If one sample is split across multiple ONT FASTQs, concatenate its chunks into
-one compressed FASTQ before submission. Otherwise each filename is treated as a
-separate sample.
+Bactopia is the only path with a read-polishing step; see the
+[Pipeline Overview](#pipeline-overview) flowchart for where Medaka/Racon fit.
 
 ### Submit Local Assemblies
 
@@ -314,8 +322,13 @@ appear in the metadata `Sample name` column.
 ```
 
 The launcher splits the list into batches and passes each batch to Bactopia with
-`--accessions`. Network access from the compute job is required for the
-downloads. `--input-type accessions` is also accepted as an alias.
+`--accessions`. **Bactopia downloads each accession automatically** — SRA/ENA
+run accessions are fetched as reads, and NCBI `GCF_`/`GCA_` accessions are
+fetched as assemblies; there is no separate download step to run. Because the
+download happens inside the batch job, **the compute node must have network
+access** (on Gadi, normal compute nodes may not — check your queue/site before
+submitting large accession runs). `--input-type accessions` is also accepted as
+an alias.
 
 ### Validate The Installation Before Submitting
 

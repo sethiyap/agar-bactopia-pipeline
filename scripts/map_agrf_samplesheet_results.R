@@ -989,14 +989,46 @@ preferred_order <- c(
   "bracken_primary_species_abundance",
   "bracken_secondary_species",
   "bracken_secondary_species_abundance",
-  "bracken_unclassified_abundance",
-  "review_required",
-  "review_reason"
+  "bracken_unclassified_abundance"
 )
 
-front_cols <- intersect(preferred_order, names(merged))
-other_cols <- setdiff(names(merged), c("sample", front_cols))
-merged <- merged[c(front_cols, other_cols)]
+# Review/QC columns always sit at the very end of the sheet, after every tool
+# block. `mlst_review_note` is appended downstream by run_review_mlst_from_tsv.sh
+# (already last there); it is listed for robustness in case it ever reaches this
+# stage. These are excluded from tool grouping so, e.g., `mlst_canonical_genus`
+# does not fold into the MLST block mid-sheet.
+review_tail_cols <- c(
+  "review_required",
+  "review_reason",
+  "mlst_canonical_genus",
+  "phenotype_canonical_genus",
+  "mlst_review_note"
+)
+
+front_cols <- setdiff(intersect(preferred_order, names(merged)), review_tail_cols)
+tail_cols <- intersect(review_tail_cols, names(merged))
+other_cols <- setdiff(names(merged), c("sample", front_cols, tail_cols))
+
+# Keep every tool's columns together in the final sheet. Any column not listed
+# in `preferred_order` (e.g. an extra field a tool emits) is grouped with its
+# tool by prefix, so same-tool columns stay contiguous instead of scattering.
+tool_prefix_order <- c(
+  "mlst_",
+  "kleborate_",
+  "fimtyper_",
+  "abritamr_",
+  "plasmidfinder_",
+  "bracken_"
+)
+tool_group_rank <- function(col) {
+  hit <- which(vapply(tool_prefix_order, function(p) startsWith(col, p), logical(1)))
+  if (length(hit)) hit[[1L]] else length(tool_prefix_order) + 1L
+}
+other_rank <- vapply(other_cols, tool_group_rank, integer(1))
+# order() is stable via the trailing seq key, preserving within-tool insertion order.
+other_cols <- other_cols[order(other_rank, seq_along(other_cols))]
+
+merged <- merged[c(front_cols, other_cols, tail_cols)]
 
 write_tsv_flex(merged, output_file)
 message("Wrote merged table: ", normalizePath(output_file, winslash = "/", mustWork = FALSE))

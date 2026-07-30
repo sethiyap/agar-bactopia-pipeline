@@ -146,9 +146,31 @@ printf 'sample\truntype\tr1\tr2\textra\nONT01\tont\t/abs/path/ONT01.fastq.gz\t\t
   > samplesheet.ont.fofn
 ```
 
+### Metadata sheet for ONT
+
+The metadata sheet is the same two-column `*_samplesheet.txt` as every other
+input type (see [The Metadata Sheet](#the-metadata-sheet-required-for-all-input-types)).
+The only ONT-specific requirement is that each `Sample name` equals the FASTQ
+filename with `.fastq.gz` / `.fq.gz` removed:
+
+```text
+Sample name	Organism
+ONT01	Escherichia coli
+ONT02	Klebsiella pneumoniae
+```
+
+So `ONT01.fastq.gz` → sample `ONT01`, and `barcode07.fq.gz` → sample `barcode07`.
+Every ONT sample must appear in the `Sample name` column.
+
 > If one sample is split across multiple ONT FASTQs, concatenate its chunks
 > into a single compressed FASTQ first — otherwise each file becomes a separate
-> sample.
+> sample. Gzipped FASTQs concatenate safely with plain `cat`:
+>
+> ```bash
+> cat ONT01_part1.fastq.gz ONT01_part2.fastq.gz > ONT01.fastq.gz
+> ```
+>
+> The pipeline does **not** concatenate for you.
 
 ## Assembly FOFN — `samplesheet.assembly.fofn`
 

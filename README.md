@@ -127,10 +127,20 @@ are pointed to from your site config:
   and **Kleborate** — see [docs/bactopia-setup.md](docs/bactopia-setup.md)
 - **Nextflow**, a container engine (**Singularity**/**Apptainer**, or Docker), and **R**
 - **conda/mamba** with **`mlst`** + **`seqkit`** for MLST review, and **`python3`** +
-  **`openpyxl`** for the workbook — `./scripts/install_optional_local_tools.sh`
-  can set the conda tools up locally
+  **`openpyxl`** for the workbook
+- **Optional: ST131Typer** (`ST131_TYPER_DIR`) — not bundled; only needed if you
+  enable `RUN_ST131_TYPER=1`. Also needs `mlst`/`seqkit` on `PATH`.
 
-Full bundled-vs-external list: [docs/runtime-dependencies.md](docs/runtime-dependencies.md).
+One helper covers the last two on non-Gadi hosts — it installs Miniforge, an
+`mlst`+`seqkit` conda env, and clones ST131Typer (symlinking `ST131Typer.sh`):
+
+```bash
+./scripts/install_optional_local_tools.sh
+```
+
+It does **not** install Bactopia, the datasets, Nextflow, the container engine, or
+`openpyxl` — provide those separately. Full bundled-vs-external list:
+[docs/runtime-dependencies.md](docs/runtime-dependencies.md).
 
 ### 3. Create your site config
 
@@ -707,6 +717,7 @@ first. See [docs/setup-gadi-rg42.md](docs/setup-gadi-rg42.md#inode-warnings-on-g
 - `scripts/validate_metadata_samples.py`: checks every input sample exists in the metadata sheet
 - `scripts/download_bactopia_datasets.sh`: downloads the custom datasets into `DATASETS_CACHE` on demand
 - `scripts/install_optional_local_tools.sh`: installs a local mlst/seqkit env and ST131Typer
+- `scripts/pull_local_containers.sh`: pre-stages the local-backend tool containers into `SING_CACHE` (for offline hosts)
 
 ## Documentation
 

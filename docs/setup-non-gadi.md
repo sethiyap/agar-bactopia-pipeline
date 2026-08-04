@@ -263,4 +263,38 @@ even after detaching.
   `bactopia_config/fimtyper.local.config`, and `config/sites/local.env.example`
   already points `FIMTYPER_CONFIG` at it. To turn FimTyper on, set
   `RUN_FIMTYPER=1` and make sure `FIMTYPER_PIPELINE` and the FimTyper container
-  (`FIMTYPER_CONTAINER`, a local `.sif`) are available on the host.
+  (`FIMTYPER_CONTAINER`) are available on the host.
+
+### Container images (pulled on first run)
+
+Bactopia's tools run inside Singularity containers. The local config references
+them by **registry URI**, so Nextflow **pulls each image into `SING_CACHE` on
+first use** — this needs internet access from the host and is slow the first time
+(later runs reuse the cache). Do **not** point the container overrides at
+non-existent local `.sif` paths: a bare filesystem path that does not exist is a
+hard error deep inside a job, whereas a URI is fetched automatically.
+
+If the host is **offline** (or its compute has no outbound internet), pre-stage
+the images first with the packaged helper — run it from a machine that *does*
+have network access to the same `SING_CACHE`:
+
+```bash
+SING_CACHE="$HOME/singularity_cache" ./scripts/pull_local_containers.sh
+```
+
+It pulls the `mlst` and `kleborate` images into `SING_CACHE` (reusing any already
+present) and prints the `SING_CACHE` / `MLST_CONTAINER` / `KLEBORATE_CONTAINER`
+lines to paste into `config/sites/local.local.env`. Use `--with-fimtyper` (with
+`FIMTYPER_CONTAINER_URI` set) to also stage FimTyper. Equivalent manual steps:
+
+```bash
+export SING_CACHE="$HOME/singularity_cache"; mkdir -p "$SING_CACHE"
+singularity pull "$SING_CACHE/mlst.sif"      docker://quay.io/biocontainers/mlst:2.33.1--hdfd78af_0
+singularity pull "$SING_CACHE/kleborate.sif" docker://quay.io/biocontainers/kleborate:2.3.2--pyhdfd78af_0
+export MLST_CONTAINER="$SING_CACHE/mlst.sif"
+export KLEBORATE_CONTAINER="$SING_CACHE/kleborate.sif"
+```
+
+The core Bactopia processes (assembly, annotation, etc.) already use Bactopia's
+own container URIs, which Nextflow pulls the same way. FimTyper, if enabled, needs
+its own container via `FIMTYPER_CONTAINER` — there is no default public image.

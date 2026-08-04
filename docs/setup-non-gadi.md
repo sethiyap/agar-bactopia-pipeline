@@ -248,3 +248,19 @@ tail -f ~/bactopia-run.log            # follow progress; Ctrl-c stops watching, 
 Either way, per-stage Nextflow output is also written to log files under the
 results/log directory, so you can `tail -f` those to watch an individual stage
 even after detaching.
+
+### FimTyper and ST131Typer on the local backend
+
+- **ST131Typer works as-is.** It is a plain bash script (not a Nextflow/scheduler
+  stage), so it runs directly on the local backend. Enable it the usual way —
+  `RUN_ST131_TYPER=1` and `ST131_TYPER_DIR=/path/to/ST131Typer` (see
+  [ST131Typer Outside rg42](#5-st131typer-outside-rg42)) — and make sure `mlst`
+  and `seqkit` are on `PATH` (they are in the activated conda env / `MLST_ENV`).
+  Keep `RUN_COLLECT_ASSEMBLIES=1` (default) so the assemblies folder is produced.
+
+- **FimTyper is off by default** because its own Nextflow config was
+  scheduler-bound. A local-executor config now ships as
+  `bactopia_config/fimtyper.local.config`, and `config/sites/local.env.example`
+  already points `FIMTYPER_CONFIG` at it. To turn FimTyper on, set
+  `RUN_FIMTYPER=1` and make sure `FIMTYPER_PIPELINE` and the FimTyper container
+  (`FIMTYPER_CONTAINER`, a local `.sif`) are available on the host.

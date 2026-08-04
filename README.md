@@ -130,7 +130,9 @@ unavailable). Every stage runs on the machine **in order, with no `qsub`/`sbatch
 and Bactopia's own processes run with Nextflow's local executor — nothing is ever
 submitted. Because it runs in the foreground, start it inside `tmux`/`screen` on a
 remote host so it survives disconnects. Simpler and slower; ideal for trial runs
-and small batches →
+and small batches. Core Bactopia, Kleborate, MLST review, and workbook export run
+by default; **ST131Typer** works too, and **FimTyper** is off by default but can be
+enabled →
 [docs/setup-non-gadi.md → local backend](docs/setup-non-gadi.md#no-scheduler-use-the-local-backend)
 
 ## Running The Pipeline

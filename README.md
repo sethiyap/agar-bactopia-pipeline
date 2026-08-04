@@ -12,6 +12,7 @@ For **setting up** an environment, pick the matching setup guide below.
 
 - [Motivation](#motivation)
 - [Pipeline Overview](#pipeline-overview)
+- [Installation](#installation)
 - [Submission Modes](#submission-modes)
 - [Running The Pipeline](#running-the-pipeline)
 - [Metadata Sheet](#metadata-sheet)
@@ -96,6 +97,55 @@ flowchart TD
 
 Everything from **Assembly ready** downward is identical across input types; only
 the coloured shared lane and the ONT-only polishing box differ by input.
+
+## Installation
+
+`agar-bactopia-pipeline` is a **clone-and-run** repository — there is no build
+step and no `pip`/`conda` package to install. You clone it, then follow the setup
+guide for your environment ([Submission Modes](#submission-modes)) to install the
+external dependencies and write your site config.
+
+### 1. Get the code
+
+```bash
+git clone https://github.com/sethiyap/agar-bactopia-pipeline.git
+cd agar-bactopia-pipeline
+./bin/agar-bactopia            # prints usage; this is the entry point
+```
+
+`bin/agar-bactopia` is the only entry point — run it in place, or add the repo's
+`bin/` to your `PATH`. On the shared rg42 Gadi install it already lives at
+`/g/data/rg42/agar-bactopia-pipeline` (nothing to clone — see
+[docs/setup-gadi-rg42.md](docs/setup-gadi-rg42.md)).
+
+### 2. External dependencies (installed once per environment)
+
+The repo ships only the orchestration scripts. These must exist on the host and
+are pointed to from your site config:
+
+- **Bactopia v3.2.0** (`BACTOPIA_PIPELINE`) + its **custom datasets** (`DATASETS_CACHE`)
+  and **Kleborate** — see [docs/bactopia-setup.md](docs/bactopia-setup.md)
+- **Nextflow**, a container engine (**Singularity**/**Apptainer**, or Docker), and **R**
+- **conda/mamba** with **`mlst`** + **`seqkit`** for MLST review, and **`python3`** +
+  **`openpyxl`** for the workbook — `./scripts/install_optional_local_tools.sh`
+  can set the conda tools up locally
+
+Full bundled-vs-external list: [docs/runtime-dependencies.md](docs/runtime-dependencies.md).
+
+### 3. Create your site config
+
+Copy the example for your backend and edit the paths (skip on the pre-configured
+rg42 install):
+
+```bash
+cp config/sites/gadi.env.example  config/sites/gadi.local.env    # PBS / Gadi
+cp config/sites/slurm.env.example config/sites/slurm.local.env   # Slurm
+cp config/sites/local.env.example config/sites/local.local.env   # local (no scheduler)
+```
+
+Then validate everything before a real run with `--dry-run` (see
+[Running The Pipeline](#running-the-pipeline)). Environment-specific steps are in
+the setup guides below.
 
 ## Submission Modes
 

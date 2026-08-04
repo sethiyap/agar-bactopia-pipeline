@@ -6,7 +6,7 @@ scheduler_backend=${SCHEDULER_BACKEND:-pbs}
 
 scheduler_require_backend() {
   case "$scheduler_backend" in
-    pbs|slurm) ;;
+    pbs|slurm|local) ;;
     *)
       printf 'Unsupported scheduler backend: %s\n' "$scheduler_backend" >&2
       return 1
@@ -14,10 +14,15 @@ scheduler_require_backend() {
   esac
 }
 
+# Monotonic counter for synthetic job ids in the local (scheduler-free) backend.
+scheduler_local_job_counter=0
+
 scheduler_resolve_script() {
   local script_path=$1
 
-  if [[ $scheduler_backend == "pbs" ]]; then
+  # PBS and the local backend both run the .pbs body directly (its #PBS lines
+  # are inert comments when the file is executed with bash).
+  if [[ $scheduler_backend == "pbs" || $scheduler_backend == "local" ]]; then
     printf '%s\n' "$script_path"
     return 0
   fi
@@ -74,6 +79,46 @@ scheduler_submit() {
   fi
 
   local output
+
+  if [[ $scheduler_backend == "local" ]]; then
+    # Scheduler-free execution: run the stage synchronously, in submission order.
+    # Dependencies and mail options are irrelevant here because each stage
+    # completes before the next scheduler_submit call returns, and a non-zero
+    # exit propagates so the caller (set -e) aborts downstream stages just like
+    # an afterok failure would.
+    scheduler_local_job_counter=$((scheduler_local_job_counter + 1))
+    local job_id="local-${scheduler_local_job_counter}"
+    local log_target
+    if [[ -n $log_dir ]]; then
+      log_target="${log_dir}/${job_name:-$job_id}.log"
+    else
+      log_target="/dev/null"
+    fi
+
+    printf 'Running stage %s (%s) -> %s\n' \
+      "$job_id" "${job_name:-unnamed}" "$log_target" >&2
+
+    # Isolate env changes in a subshell: export the KEY=VAL pairs from env_csv,
+    # provide the PBS_* variables the .pbs bodies expect, then run the stage.
+    if (
+      set +u
+      IFS=','
+      for kv in $env_csv; do
+        [[ -n $kv ]] && export "${kv?}"
+      done
+      export PBS_O_WORKDIR="$PWD"
+      export PBS_JOBID="$job_id"
+      export PBS_JOBNAME="${job_name:-$job_id}"
+      exec bash "$script_path"
+    ) >"$log_target" 2>&1; then
+      printf '%s\n' "$job_id"
+      return 0
+    else
+      local rc=$?
+      printf 'Local stage failed (%s), see log: %s\n' "$job_id" "$log_target" >&2
+      return "$rc"
+    fi
+  fi
 
   if [[ $scheduler_backend == "pbs" ]]; then
     local -a cmd=(qsub)

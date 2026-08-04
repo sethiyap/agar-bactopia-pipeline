@@ -579,12 +579,28 @@ run_dry_run_validation() {
   case "$scheduler_backend" in
     pbs) dry_run_check_command qsub "PBS qsub" ;;
     slurm) dry_run_check_command sbatch "Slurm sbatch" ;;
+    local)
+      # No scheduler: stages run here, so the tools must be on PATH directly.
+      dry_run_check_command nextflow "Nextflow"
+      if command -v singularity >/dev/null 2>&1 || command -v apptainer >/dev/null 2>&1; then
+        dry_run_pass "container engine available: $(command -v singularity || command -v apptainer)"
+      else
+        dry_run_fail "No container engine on PATH (need singularity or apptainer) for the local backend."
+      fi
+      dry_run_check_command Rscript "R (Rscript)"
+      dry_run_check_command python3 "python3"
+      ;;
   esac
 
-  if type module >/dev/null 2>&1; then
-    dry_run_pass "module command is available in the current shell"
+  # Environment modules only matter when the job scripts actually load them.
+  if [[ "${USE_MODULES:-1}" != "0" ]]; then
+    if type module >/dev/null 2>&1; then
+      dry_run_pass "module command is available in the current shell"
+    else
+      dry_run_warn "module command is not available in the current shell. Job-time module loads are not being checked from this dry run."
+    fi
   else
-    dry_run_warn "module command is not available in the current shell. Job-time module loads are not being checked from this dry run."
+    dry_run_pass "USE_MODULES=0: tools taken from PATH/conda, not environment modules"
   fi
 
   dry_run_check_dir "RUN_AGAR_DIR" "$run_agar_dir"

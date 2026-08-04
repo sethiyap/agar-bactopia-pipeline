@@ -8,6 +8,13 @@ Once setup is done, running the pipeline is the same for everyone — see the ma
 [README](../README.md) for the universal command, metadata sheet, FOFN, and
 outputs. Only the backend word changes (`submit slurm` instead of `submit gadi`).
 
+There are **two** ways to run off Gadi:
+
+- **`submit slurm`** — your cluster has a working Slurm scheduler (jobs go to `sbatch`).
+- **`submit local`** — no scheduler (or Slurm is down): every stage runs on the
+  current machine, and Bactopia's processes run with Nextflow's local executor.
+  See [No Scheduler? Use The Local Backend](#no-scheduler-use-the-local-backend).
+
 ## 1. Prerequisites
 
 The Slurm backend assumes a Linux host with:
@@ -127,3 +134,117 @@ options, metadata sheet, and FOFN are the same as on the main
 [README](../README.md#running-the-pipeline); the public options are identical to
 the Gadi backend (`--additional-tools`, `--dry-run`, `--is-agar-project`,
 `--site-config`, `--mail-user`, `--mail-options`).
+
+## No Scheduler? Use The Local Backend
+
+Use `submit local` when the host has **no working job scheduler** — either there
+is no Slurm/PBS at all, or (as on Firefly) Slurm is down so `sbatch` fails. The
+local backend:
+
+- runs every pipeline stage **on the current machine, in order** (no `qsub`/`sbatch`);
+- drives Bactopia with Nextflow's **local executor** (via
+  `scripts/nextflow.local.all_tools.config`, `executor = 'local'`), so Bactopia's
+  own processes are local subprocesses too — nothing is ever submitted;
+- uses tools from `PATH`/conda instead of environment modules (`USE_MODULES=0`).
+
+Stages run sequentially (one batch at a time); parallelism happens *within* each
+stage via Nextflow (`LOCAL_MAX_FORKS`). Per-stage output goes to log files under
+the results/log directory. It is simpler and slower than a real cluster — fine
+for trial runs and small batches on one host.
+
+### Prerequisites on PATH
+
+`nextflow`, a container engine (`singularity` or `apptainer`), `R`/`Rscript`, and
+`python3` with `openpyxl` must all be on `PATH`. The MLST review env
+(`MINIFORGE_ROOT`/`MLST_ENV` with `mlst`+`seqkit`) is still required (step 2).
+Run everything from your activated conda env so the right tools are found.
+
+### Set up the local site config
+
+```bash
+cp config/sites/local.env.example config/sites/local.local.env
+```
+
+Edit `config/sites/local.local.env` and set `BACTOPIA_PIPELINE`, `DATASETS_CACHE`,
+`KRAKEN2_DB`, `MINIFORGE_ROOT`, `MLST_ENV`, and `SING_CACHE`. Already set for you:
+`USE_MODULES=0`, `RUN_FIMTYPER=0` (FimTyper needs a scheduler-bound config), and
+`NEXTFLOW_CONFIG` pointing at the local executor config. Optional resource caps:
+`LOCAL_MAX_CPUS`, `LOCAL_MAX_MEMORY`, `LOCAL_MAX_FORKS`.
+
+### Validate, then run
+
+```bash
+# from your activated conda env (e.g. `conda activate bactopia-3.2.0`)
+./bin/agar-bactopia submit local \
+  --site-config config/sites/local.local.env \
+  --dry-run \
+  /path/to/raw_fastqs \
+  /path/to/metadata \
+  "$HOME/bactopia_runs/project_001" \
+  2
+```
+
+The dry run checks `nextflow`/`singularity`/`Rscript`/`python3` on PATH (not
+`qsub`/`sbatch`). Fix anything flagged, then drop `--dry-run`. Everything else —
+command shape, options, metadata sheet, FOFN, outputs — is identical to the main
+[README](../README.md#running-the-pipeline).
+
+### Firefly example
+
+Firefly has `nextflow`, `singularity`, and `R` on PATH but no modulefiles, and a
+`bactopia-3.2.0` conda env. So:
+
+```bash
+conda activate bactopia-3.2.0
+cp config/sites/local.env.example config/sites/local.local.env
+# edit BACTOPIA_PIPELINE / DATASETS_CACHE / KRAKEN2_DB / MINIFORGE_ROOT / MLST_ENV / SING_CACHE
+./bin/agar-bactopia submit local --site-config config/sites/local.local.env --dry-run \
+  ~/bactopia-trial-runs/raw ~/bactopia-trial-runs/metadata ~/bactopia-trial-runs/results 2
+```
+
+### Keep the run alive: tmux or screen
+
+Unlike `submit gadi`/`submit slurm` (which hand jobs to a scheduler and return
+immediately), `submit local` runs the whole pipeline as **one long-running
+foreground process**. If you launch it over SSH and your connection drops, the
+run is killed. On a remote host, always start it inside a detachable session —
+`tmux` or `screen` — or with `nohup`.
+
+**tmux:**
+
+```bash
+tmux new -s bactopia                 # start a named session
+conda activate bactopia-3.2.0
+./bin/agar-bactopia submit local \
+  --site-config config/sites/local.local.env \
+  ~/bactopia-trial-runs/raw ~/bactopia-trial-runs/metadata ~/bactopia-trial-runs/results 2
+# detach and leave it running:  press Ctrl-b then d
+# reconnect later:              tmux attach -t bactopia
+# list sessions:                tmux ls
+```
+
+**screen:**
+
+```bash
+screen -S bactopia                   # start a named session
+conda activate bactopia-3.2.0
+./bin/agar-bactopia submit local \
+  --site-config config/sites/local.local.env \
+  ~/bactopia-trial-runs/raw ~/bactopia-trial-runs/metadata ~/bactopia-trial-runs/results 2
+# detach:      press Ctrl-a then d
+# reconnect:   screen -r bactopia
+```
+
+**nohup (no session manager available):**
+
+```bash
+nohup ./bin/agar-bactopia submit local \
+  --site-config config/sites/local.local.env \
+  ~/bactopia-trial-runs/raw ~/bactopia-trial-runs/metadata ~/bactopia-trial-runs/results 2 \
+  > ~/bactopia-run.log 2>&1 &
+tail -f ~/bactopia-run.log            # follow progress; Ctrl-c stops watching, not the run
+```
+
+Either way, per-stage Nextflow output is also written to log files under the
+results/log directory, so you can `tail -f` those to watch an individual stage
+even after detaching.

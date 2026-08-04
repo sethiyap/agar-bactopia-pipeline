@@ -75,9 +75,14 @@ if [[ ! -f "$NEXTFLOW_CONFIG" ]]; then
   exit 1
 fi
 
-module purge
-module load nextflow
-module load singularity
+# Load tools via environment modules on module-based clusters (e.g. Gadi).
+# Set USE_MODULES=0 (in the site config) when nextflow/singularity come from
+# PATH or a conda env instead — then the job uses whatever is already on PATH.
+if [[ "${USE_MODULES:-1}" == "1" ]]; then
+  module purge
+  module load nextflow
+  module load singularity
+fi
 
 export NXF_HOME="$SCRATCH_RUN/.nextflow"
 export NXF_WORK="$SCRATCH_RUN/work"

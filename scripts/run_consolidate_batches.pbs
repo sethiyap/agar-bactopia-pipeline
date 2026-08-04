@@ -31,8 +31,10 @@ if [[ ! -d "$RESULTS_ROOT" ]]; then
   exit 1
 fi
 
-module purge
-module load R
+if [[ "${USE_MODULES:-1}" == "1" ]]; then
+  module purge
+  module load R
+fi
 
 Rscript "$CONSOLIDATE_SCRIPT" \
   --results-root "$RESULTS_ROOT" \

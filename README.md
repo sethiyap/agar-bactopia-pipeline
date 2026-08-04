@@ -12,7 +12,7 @@ For **setting up** an environment, pick the matching setup guide below.
 
 - [Motivation](#motivation)
 - [Pipeline Overview](#pipeline-overview)
-- [Choose Your Setup Guide](#choose-your-setup-guide)
+- [Submission Modes](#submission-modes)
 - [Running The Pipeline](#running-the-pipeline)
 - [Metadata Sheet](#metadata-sheet)
 - [Input Manifests (FOFN)](#input-manifests-fofn)
@@ -97,24 +97,47 @@ flowchart TD
 Everything from **Assembly ready** downward is identical across input types; only
 the coloured shared lane and the ONT-only polishing box differ by input.
 
-## Choose Your Setup Guide
+## Submission Modes
 
-Setting up an environment is a one-time task. Pick the guide that matches you:
+The same workflow runs through one of **three submission backends** — the word
+after `submit` on the command line. Pick the one that matches your system, then
+follow its setup guide. All three end in the same universal command
+([Running The Pipeline](#running-the-pipeline)).
 
-- **Shared rg42 Gadi users** → [docs/setup-gadi-rg42.md](docs/setup-gadi-rg42.md)
-  — everything is already installed; you just move data in, submit, and copy
-  results back.
-- **Other Gadi projects (non-rg42)** → [docs/setup-gadi-other.md](docs/setup-gadi-other.md)
-  — deploy under your own NCI project: install Bactopia, datasets, and write your
-  site config.
-- **Non-Gadi (Slurm / generic Linux)** → [docs/setup-non-gadi.md](docs/setup-non-gadi.md)
-  — install packages and dependencies, then write your Slurm site config.
+### 1. PBS submission (NCI Gadi) — `submit gadi`
 
-All three end in the same place: the universal command below.
+For the PBS Pro scheduler on **NCI Gadi**. Jobs are submitted with `qsub`. This
+covers both Gadi deployments:
+
+- **Shared `rg42` install** — already installed and configured; you just move
+  data in, submit, and copy results back →
+  [docs/setup-gadi-rg42.md](docs/setup-gadi-rg42.md)
+- **Another Gadi project (non-rg42)** — deploy under your own NCI project:
+  install Bactopia + datasets and write your site config →
+  [docs/setup-gadi-other.md](docs/setup-gadi-other.md)
+
+### 2. Slurm submission — `submit slurm`
+
+For a **non-Gadi Linux cluster with a working Slurm scheduler**. Jobs are
+submitted with `sbatch`. Set your partition/account and paths in a Slurm site
+config → [docs/setup-non-gadi.md](docs/setup-non-gadi.md)
+
+### 3. Local submission (Linux host or Firefly) — `submit local`
+
+For a **single Linux host with no working scheduler** — either there is no
+PBS/Slurm at all, or the scheduler is down (as on Firefly, where Slurm is
+unavailable). Every stage runs on the machine **in order, with no `qsub`/`sbatch`**,
+and Bactopia's own processes run with Nextflow's local executor — nothing is ever
+submitted. Because it runs in the foreground, start it inside `tmux`/`screen` on a
+remote host so it survives disconnects. Simpler and slower; ideal for trial runs
+and small batches →
+[docs/setup-non-gadi.md → local backend](docs/setup-non-gadi.md#no-scheduler-use-the-local-backend)
 
 ## Running The Pipeline
 
-Command shape (the backend is `gadi` for PBS or `slurm` for Slurm):
+Command shape (the backend is `gadi` for PBS, `slurm` for Slurm, or `local` for
+a single host with no scheduler — see
+[docs/setup-non-gadi.md](docs/setup-non-gadi.md#no-scheduler-use-the-local-backend)):
 
 ```bash
 ./bin/agar-bactopia submit gadi \
@@ -624,6 +647,7 @@ first. See [docs/setup-gadi-rg42.md](docs/setup-gadi-rg42.md#inode-warnings-on-g
 - `bin/agar-bactopia`: public command-line entrypoint
 - `wrappers/submit.gadi.sh`: PBS Pro submission wrapper for Gadi
 - `wrappers/submit.slurm.sh`: generic Slurm submission wrapper
+- `wrappers/submit.local.sh`: scheduler-free wrapper (runs stages on one host, no qsub/sbatch)
 - `config/defaults.env`: scheduler-agnostic defaults
 - `config/sites/`: site-specific configuration files
 - `scripts/`: helper scripts and job wrappers
@@ -634,11 +658,11 @@ first. See [docs/setup-gadi-rg42.md](docs/setup-gadi-rg42.md#inode-warnings-on-g
 
 ## Documentation
 
-Setup guides (pick one for your environment):
+Setup guides by submission mode (see [Submission Modes](#submission-modes)):
 
-- [docs/setup-gadi-rg42.md](docs/setup-gadi-rg42.md): shared rg42 Gadi users
-- [docs/setup-gadi-other.md](docs/setup-gadi-other.md): other Gadi projects (non-rg42)
-- [docs/setup-non-gadi.md](docs/setup-non-gadi.md): non-Gadi (Slurm / generic Linux)
+- PBS (`submit gadi`): [docs/setup-gadi-rg42.md](docs/setup-gadi-rg42.md) (shared rg42) and [docs/setup-gadi-other.md](docs/setup-gadi-other.md) (other Gadi project)
+- Slurm (`submit slurm`): [docs/setup-non-gadi.md](docs/setup-non-gadi.md)
+- Local (`submit local`, Linux host / Firefly): [docs/setup-non-gadi.md → local backend](docs/setup-non-gadi.md#no-scheduler-use-the-local-backend)
 
 Reference:
 

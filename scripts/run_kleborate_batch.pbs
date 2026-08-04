@@ -58,9 +58,11 @@ if [[ ! -f "$KLEBORATE_COMPAT_SCRIPT" ]]; then
   exit 1
 fi
 
-module purge
-module load nextflow
-module load singularity
+if [[ "${USE_MODULES:-1}" == "1" ]]; then
+  module purge
+  module load nextflow
+  module load singularity
+fi
 
 export NXF_HOME="$SCRATCH_RUN/.nextflow"
 export NXF_WORK="$SCRATCH_RUN/work"

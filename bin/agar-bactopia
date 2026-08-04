@@ -16,6 +16,9 @@ Usage:
   ./bin/agar-bactopia submit slurm RAW_FASTQ_DIR METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
   ./bin/agar-bactopia submit slurm --dry-run RAW_FASTQ_DIR METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
   ./bin/agar-bactopia submit slurm --site-config config/sites/slurm.local.env RAW_FASTQ_DIR METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
+  ./bin/agar-bactopia submit local RAW_FASTQ_DIR METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
+  ./bin/agar-bactopia submit local --dry-run RAW_FASTQ_DIR METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
+  ./bin/agar-bactopia submit local --site-config config/sites/local.local.env RAW_FASTQ_DIR METADATA_DIR RESULTS_ROOT [BATCH_SIZE]
 EOF
 }
 
@@ -37,6 +40,9 @@ case "$command:$backend" in
     ;;
   submit:slurm)
     exec "$project_root/wrappers/submit.slurm.sh" "$@"
+    ;;
+  submit:local)
+    exec "$project_root/wrappers/submit.local.sh" "$@"
     ;;
   *)
     usage >&2

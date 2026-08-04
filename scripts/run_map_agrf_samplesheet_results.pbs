@@ -39,8 +39,10 @@ if [[ -z "$MAP_SCRIPT" || ! -f "$MAP_SCRIPT" ]]; then
   exit 1
 fi
 
-module purge
-module load R
+if [[ "${USE_MODULES:-1}" == "1" ]]; then
+  module purge
+  module load R
+fi
 
 cmd=(
   Rscript --vanilla "$MAP_SCRIPT"

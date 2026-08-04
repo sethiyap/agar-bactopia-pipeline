@@ -52,9 +52,11 @@ fi
 
 mkdir -p "$SCRATCH_RUN" "$RESULTS_OUT" "$SING_CACHE"
 
-module purge
-module load nextflow
-module load singularity
+if [[ "${USE_MODULES:-1}" == "1" ]]; then
+  module purge
+  module load nextflow
+  module load singularity
+fi
 
 export NXF_HOME="$SCRATCH_RUN/.nextflow"
 export NXF_WORK="$SCRATCH_RUN/work"

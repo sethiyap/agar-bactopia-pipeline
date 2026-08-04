@@ -121,6 +121,15 @@ The `slurm` backend assumes:
 - `R`
 - writable scratch or project work space appropriate for your site
 
+The `local` backend (scheduler-free; `submit local`) assumes:
+
+- a Linux host with **no** required scheduler — stages run in-process, in order
+- `nextflow`, `singularity`/`apptainer`, `R`/`Rscript`, and `python3` + `openpyxl`
+  on `PATH` (typically via an activated conda env); `USE_MODULES=0`
+- Bactopia runs with Nextflow's local executor via
+  `scripts/nextflow.local.all_tools.config`
+- see [setup-non-gadi.md](setup-non-gadi.md) "No Scheduler? Use The Local Backend"
+
 ## Site Config Entry Point
 
 Gadi installs should set shared paths through:

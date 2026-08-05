@@ -18,7 +18,7 @@ For **setting up** an environment, pick the matching setup guide below.
 - [Metadata Sheet](#metadata-sheet)
 - [Input Manifests (FOFN)](#input-manifests-fofn)
 - [Common Variations](#common-variations)
-- [Optional ST131Typer Workflow](#optional-st131typer-workflow)
+- [Optional Tools: FimTyper And ST131Typer](#optional-tools-fimtyper-and-st131typer)
 - [Outputs](#outputs)
 - [Troubleshooting](#troubleshooting)
 - [Repository Layout](#repository-layout)
@@ -532,14 +532,52 @@ In `POSTPROCESS_ONLY=1` mode, the trailing `50` does not limit the work to 50
 samples. Consolidation runs across all batch directories already present under
 `RESULTS_ROOT`.
 
-## Optional ST131Typer Workflow
+## Optional Tools: FimTyper And ST131Typer
 
-ST131Typer is optional and does not run by default. Point `ST131_TYPER_DIR` at
-your ST131Typer clone (rg42 users: the shared clone is
-`/g/data/rg42/ST131Typer` — see [docs/setup-gadi-rg42.md](docs/setup-gadi-rg42.md);
+**FimTyper** and **ST131Typer** are both **off by default on every backend**
+(`gadi`, `slurm`, `local`) — they are opt-in per run because each needs setup the
+core tools don't. Everything else (Bactopia, Kleborate, extra tools, MLST review,
+mapping, workbook) runs automatically.
+
+### FimTyper
+
+Off by default because it needs its own Nextflow config and a FimTyper container
+(no universal public image). Enable it by setting `RUN_FIMTYPER=1` and pointing at
+the FimTyper pipeline, the backend-matched config, and the container:
+
+```bash
+RUN_FIMTYPER=1 \
+FIMTYPER_PIPELINE=/path/to/bactopia_config/fimtyper.nf \
+FIMTYPER_CONFIG=/path/to/bactopia_config/fimtyper.gadi.config \
+FIMTYPER_CONTAINER=/path/to/fimtyper.sif \
+./bin/agar-bactopia submit gadi \
+  /path/to/raw_fastqs \
+  /path/to/metadata \
+  /path/to/results \
+  50
+```
+
+- use `fimtyper.gadi.config` / `fimtyper.slurm.config` / `fimtyper.local.config`
+  to match the backend
+- on the shared rg42 install the FimTyper paths are already in the site config, so
+  `RUN_FIMTYPER=1` alone is enough there
+- on the `local` backend, `FIMTYPER_PIPELINE`/`FIMTYPER_CONFIG` are pre-wired in
+  `local.env.example`; you only add `RUN_FIMTYPER=1` and a `FIMTYPER_CONTAINER`
+
+### ST131Typer
+
+**Setup once** — the tool is not bundled. Either let the repo install it
+(also sets up the `mlst`/`seqkit` env it depends on):
+
+```bash
+./scripts/install_optional_local_tools.sh
+```
+
+or point at an existing clone with `ST131_TYPER_DIR` (rg42 users: the shared clone
+is `/g/data/rg42/ST131Typer` — see [docs/setup-gadi-rg42.md](docs/setup-gadi-rg42.md);
 other sites: [docs/setup-non-gadi.md](docs/setup-non-gadi.md)).
 
-To include it in the main submission:
+**Enable per run** by adding it to the main submission:
 
 ```bash
 ST131_TYPER_DIR=/path/to/ST131Typer \

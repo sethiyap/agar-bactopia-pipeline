@@ -1,0 +1,62 @@
+name: build-fimtyper
+
+# Builds the FimTyper container and publishes it to GHCR so the pipeline can
+# auto-pull it (no external install). Trigger manually, or by pushing a tag like
+# fimtyper-v1.0. After the first publish, make the GHCR package PUBLIC so
+# anonymous pulls (Singularity/Nextflow) work.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Image tag to publish (e.g. 1.0)"
+        required: true
+        default: "1.0"
+  push:
+    tags:
+      - "fimtyper-v*"
+
+env:
+  IMAGE_NAME: agar-bactopia-fimtyper
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Derive lowercase owner and tag
+        id: meta
+        run: |
+          echo "owner=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            echo "tag=${GITHUB_REF_NAME#fimtyper-v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: containers/fimtyper
+          file: containers/fimtyper/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ steps.meta.outputs.owner }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.tag }}
+            ghcr.io/${{ steps.meta.outputs.owner }}/${{ env.IMAGE_NAME }}:latest
+
+      - name: Summary
+        run: |
+          echo "Published ghcr.io/${{ steps.meta.outputs.owner }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.tag }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Remember to set the package visibility to PUBLIC in GHCR." >> "$GITHUB_STEP_SUMMARY"

@@ -83,7 +83,28 @@ helper builds it (see [docs/setup-non-gadi.md](setup-non-gadi.md#2-install-optio
 or `scripts/install_optional_local_tools.sh`), or create it manually per
 [docs/runtime-dependencies.md](runtime-dependencies.md).
 
-## 6. Validate, Then Run
+## 6. Optional: FimTyper
+
+FimTyper is off by default. The image is published to GHCR, but **Gadi compute
+nodes have no internet**, so it must be **pre-staged** into `SING_CACHE` — Nextflow
+cannot pull it at run time on a compute node. Do one of these on a **login node**
+(which does have internet), then set `FIMTYPER_CONTAINER` to the result:
+
+```bash
+# Pre-pull the published image into your project cache:
+SING_CACHE=/g/data/<your_project>/bactopia/caches/singularity \
+  /g/data/<your_project>/agar-bactopia-pipeline/scripts/pull_local_containers.sh --with-fimtyper
+
+# ...or copy the rg42 image if you have read access:
+cp /g/data/rg42/bactopia/caches/singularity/fimtyper.sif \
+   /g/data/<your_project>/bactopia/caches/singularity/fimtyper.sif
+```
+
+Keep `FIMTYPER_CONFIG` on `fimtyper.gadi.config` and set `FIMTYPER_CONTAINER` to
+the staged `.sif`, then enable with `RUN_FIMTYPER=1`. Details and build-your-own:
+[docs/setup-non-gadi.md → Getting the FimTyper container](setup-non-gadi.md#getting-the-fimtyper-container).
+
+## 7. Validate, Then Run
 
 Validate config, inputs, and dependencies without submitting jobs:
 

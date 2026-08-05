@@ -629,10 +629,10 @@ run_dry_run_validation() {
   fi
 
   if [[ $run_tools != 0 ]] && ( tools_string_contains "kraken2" "${tools_list[@]}" || tools_string_contains "bracken" "${tools_list[@]}" ); then
-    if [[ -n ${KRAKEN2_DB:-} ]]; then
-      dry_run_check_path "KRAKEN2_DB" "$KRAKEN2_DB"
+    if [[ -n ${KRAKEN2_DB:-} && -e ${KRAKEN2_DB:-} ]]; then
+      dry_run_pass "KRAKEN2_DB found: $KRAKEN2_DB"
     else
-      dry_run_fail "KRAKEN2_DB is required because TOOLS_STRING includes kraken2 or bracken"
+      dry_run_fail "KRAKEN2_DB not found: ${KRAKEN2_DB:-<unset>} (required because TOOLS_STRING includes kraken2 or bracken). Download a prebuilt index with scripts/download_kraken2_db.sh, or point KRAKEN2_DB at an existing DB. See docs/bactopia-setup.md."
     fi
   fi
 

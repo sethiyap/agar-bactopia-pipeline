@@ -298,3 +298,92 @@ export KLEBORATE_CONTAINER="$SING_CACHE/kleborate.sif"
 The core Bactopia processes (assembly, annotation, etc.) already use Bactopia's
 own container URIs, which Nextflow pulls the same way. FimTyper, if enabled, needs
 its own container via `FIMTYPER_CONTAINER` — there is no default public image.
+
+### Getting the FimTyper container
+
+**On an internet-connected host you do not install anything** — the FimTyper
+image is published to GHCR (`ghcr.io/sethiyap/agar-bactopia-fimtyper`) and the
+Slurm/local configs default `FIMTYPER_CONTAINER` to it, so Nextflow **auto-pulls**
+it into `SING_CACHE` on first use. Just set `RUN_FIMTYPER=1`.
+
+The options below are only needed for **offline hosts**, or if you prefer to
+pre-stage or build the image yourself. The image is custom — the pipeline runs
+`perl /usr/local/fimtyper/fimtyper.pl -d /usr/local/fimtyper/fimtyper_db`, so it
+must contain FimTyper (a CGE tool) and its DB at those paths; a stock biocontainer
+will not work.
+
+- **Pre-stage the published image** (offline hosts) with the packaged helper —
+  run it where there is network to the same `SING_CACHE`:
+
+  ```bash
+  SING_CACHE="$HOME/singularity_cache" ./scripts/pull_local_containers.sh --with-fimtyper
+  ```
+
+Install references (for building your own): FimTyper source
+<https://bitbucket.org/genomicepidemiology/fimtyper>, database
+<https://bitbucket.org/genomicepidemiology/fimtyper_db>, CGE service
+<https://cge.food.dtu.dk/services/FimTyper/>.
+
+- **Copy the existing rg42 image** (simplest — already built to match) into your
+  `SING_CACHE`, then set `FIMTYPER_CONTAINER`. The image lives at
+  `/g/data/rg42/bactopia/caches/singularity/fimtyper.sif`:
+
+  ```bash
+  # On Gadi with read access to the rg42 project:
+  cp /g/data/rg42/bactopia/caches/singularity/fimtyper.sif "$HOME/singularity_cache/fimtyper.sif"
+
+  # From a non-Gadi host (pulls it over SSH; needs a Gadi account with rg42 access):
+  rsync -avP <you>@gadi.nci.org.au:/g/data/rg42/bactopia/caches/singularity/fimtyper.sif \
+    "$HOME/singularity_cache/fimtyper.sif"
+
+  export FIMTYPER_CONTAINER="$HOME/singularity_cache/fimtyper.sif"
+  ```
+
+  If you are not in the `rg42` project, ask someone who is to share the `.sif`
+  (or build your own below).
+
+- **Build your own** from CGE FimTyper + its DB (template — verify the upstream
+  layout, and adjust the paths in `bactopia_config/fimtyper.nf` if they differ):
+
+  ```text
+  Bootstrap: docker
+  From: ubuntu:22.04
+
+  %post
+      apt-get update && apt-get install -y perl ncbi-blast+ git
+      git clone https://bitbucket.org/genomicepidemiology/fimtyper.git /usr/local/fimtyper
+      git clone https://bitbucket.org/genomicepidemiology/fimtyper_db.git /usr/local/fimtyper/fimtyper_db
+  ```
+
+  ```bash
+  singularity build "$HOME/singularity_cache/fimtyper.sif" fimtyper.def
+  export FIMTYPER_CONTAINER="$HOME/singularity_cache/fimtyper.sif"
+  ```
+
+Once the container is in place, enable FimTyper with `RUN_FIMTYPER=1`.
+
+#### Maintainer: publishing the FimTyper image
+
+The auto-pull default works only once the image is published **and public**. The
+configs default to `oras://ghcr.io/sethiyap/agar-bactopia-fimtyper:1.0`, so the
+primary publish path reuses the proven rg42 `.sif`:
+
+- **Primary — ORAS-push the proven `.sif`** (matches the config default; no build
+  risk). From a host with network + the `.sif` (e.g. a Gadi login node):
+
+  ```bash
+  singularity push /g/data/rg42/bactopia/caches/singularity/fimtyper.sif \
+    oras://ghcr.io/sethiyap/agar-bactopia-fimtyper:1.0
+  ```
+
+- **Alternative — build from source (reproducible):** trigger the `build-fimtyper`
+  GitHub Actions workflow ([.github/workflows/build-fimtyper.yml](../.github/workflows/build-fimtyper.yml)),
+  or push a `fimtyper-v<tag>` tag. It builds
+  [containers/fimtyper/Dockerfile](../containers/fimtyper/Dockerfile) and pushes a
+  docker image to GHCR; point `FIMTYPER_CONTAINER` at that docker ref
+  (`ghcr.io/…`, no `oras://`). The Dockerfile's BLAST flavour may need iteration —
+  validate with a test run.
+
+After publishing, set the GHCR package visibility to **public** so anonymous
+Singularity/Nextflow pulls work. Until then, users can still use the
+`FIMTYPER_CONTAINER` override or copy the rg42 `.sif`.

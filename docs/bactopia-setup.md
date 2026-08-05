@@ -167,7 +167,48 @@ bactopia datasets --help
 
 then point `DATASETS_CACHE` at the directory it produces.
 
-## 4. Kleborate
+## 4. Kraken2 / Bracken Database (`KRAKEN2_DB`)
+
+Only needed when the extra-tools bundle runs **kraken2** or **bracken** (taxonomic
+classification). It is a large prebuilt index (commonly 8–100+ GB) that Kraken2
+loads into RAM — so it is not bundled or auto-pulled; you point `KRAKEN2_DB` at
+one.
+
+### Find it if it already exists
+
+A built Kraken2 DB is a directory containing `hash.k2d`, `opts.k2d`, and
+`taxo.k2d` (prebuilt indexes also include Bracken's `database*.kmer_distrib`).
+
+```bash
+# check a candidate path:
+ls -lh "$KRAKEN2_DB"/*.k2d
+# or search common locations:
+find /g/data /scratch "$HOME" -maxdepth 4 -name hash.k2d 2>/dev/null
+```
+
+On the shared rg42 install it is at
+`/g/data/rg42/bactopia/kraken_indices/k2_pluspf_16_GB_20251015`.
+
+### Install it if not present
+
+Download a prebuilt Kraken2+Bracken index with the packaged helper (reuses an
+existing DB, prompts before the large download):
+
+```bash
+KRAKEN2_DB=/path/to/kraken2_db \
+  ./scripts/download_kraken2_db.sh \
+    --url https://genome-idx.s3.amazonaws.com/kraken/k2_pluspf_16gb_YYYYMMDD.tar.gz
+```
+
+Pick a collection and size to match your host RAM (Standard, PlusPF, PlusPFP, …)
+and copy its current dated tarball URL from the Kraken2/Bracken index collection:
+<https://benlangmead.github.io/aws-indexes/k2>. The `--url` is required because
+the indexes are versioned by date. Then set `KRAKEN2_DB` in your site config.
+
+To skip kraken2/bracken entirely instead, leave them out of the tools bundle
+(they only run when `--additional-tools yes` / the tool list includes them).
+
+## 5. Kleborate
 
 You do **not** install Kleborate separately. It runs inside Bactopia's container
 via `--wf kleborate`

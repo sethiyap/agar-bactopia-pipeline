@@ -42,14 +42,16 @@ These are not bundled in the repo and must exist on the execution site.
   - `DATASETS_CACHE`
   - download on demand with `scripts/download_bactopia_datasets.sh`; see
     [bactopia-setup.md](bactopia-setup.md)
-- Kraken2 / Bracken database:
-  - `KRAKEN2_DB`
-- FimTyper pipeline:
-  - `FIMTYPER_PIPELINE`
-- FimTyper config:
-  - `FIMTYPER_CONFIG`
-- optional FimTyper merge helper:
-  - `MERGE_FIMTYPER_SCRIPT`
+- Kraken2 / Bracken database (only when kraken2/bracken tools run):
+  - `KRAKEN2_DB` — large prebuilt index; find an existing one or download with
+    `scripts/download_kraken2_db.sh`. See
+    [bactopia-setup.md](bactopia-setup.md#4-kraken2--bracken-database-kraken2_db).
+- FimTyper (opt-in; `RUN_FIMTYPER=1`):
+  - `FIMTYPER_PIPELINE`, `FIMTYPER_CONFIG`, optional `MERGE_FIMTYPER_SCRIPT`
+  - container is **published to GHCR and auto-pulled** on Slurm/local (no external
+    install); on Gadi it is pre-staged (see
+    [setup-non-gadi.md](setup-non-gadi.md#getting-the-fimtyper-container)). Built from
+    `containers/fimtyper/Dockerfile` via `.github/workflows/build-fimtyper.yml`.
 - Singularity cache and, if pre-pulled, container images:
   - `SING_CACHE`
   - optional `MLST_CONTAINER`

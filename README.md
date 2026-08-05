@@ -541,28 +541,31 @@ mapping, workbook) runs automatically.
 
 ### FimTyper
 
-Off by default because it needs its own Nextflow config and a FimTyper container
-(no universal public image). Enable it by setting `RUN_FIMTYPER=1` and pointing at
-the FimTyper pipeline, the backend-matched config, and the container:
+Off by default, but **no external install needed**: the FimTyper image is
+published to GHCR and **auto-pulled** by Nextflow (like mlst/kleborate), so on an
+internet-connected host you just enable it:
 
 ```bash
 RUN_FIMTYPER=1 \
-FIMTYPER_PIPELINE=/path/to/bactopia_config/fimtyper.nf \
-FIMTYPER_CONFIG=/path/to/bactopia_config/fimtyper.gadi.config \
-FIMTYPER_CONTAINER=/path/to/fimtyper.sif \
-./bin/agar-bactopia submit gadi \
+./bin/agar-bactopia submit local \
+  --site-config config/sites/local.local.env \
   /path/to/raw_fastqs \
   /path/to/metadata \
   /path/to/results \
   50
 ```
 
-- use `fimtyper.gadi.config` / `fimtyper.slurm.config` / `fimtyper.local.config`
-  to match the backend
-- on the shared rg42 install the FimTyper paths are already in the site config, so
-  `RUN_FIMTYPER=1` alone is enough there
-- on the `local` backend, `FIMTYPER_PIPELINE`/`FIMTYPER_CONFIG` are pre-wired in
-  `local.env.example`; you only add `RUN_FIMTYPER=1` and a `FIMTYPER_CONTAINER`
+- **Slurm / local:** the `FIMTYPER_CONTAINER` default is the published GHCR image,
+  pulled into `SING_CACHE` on first use — `RUN_FIMTYPER=1` is all you need.
+- **Gadi:** compute nodes have no internet, so the image is **pre-staged**
+  instead (the shared rg42 `.sif`, or pre-pull the GHCR image on a login node —
+  see [docs/setup-gadi-other.md](docs/setup-gadi-other.md#6-optional-fimtyper)).
+- On the shared rg42 install, `RUN_FIMTYPER=1` alone works (already configured).
+- Offline hosts: pre-stage with `./scripts/pull_local_containers.sh --with-fimtyper`
+  and/or override `FIMTYPER_CONTAINER=/path/to/fimtyper.sif`.
+
+The published image is maintained from [containers/fimtyper/Dockerfile](containers/fimtyper/Dockerfile)
+via [.github/workflows/build-fimtyper.yml](.github/workflows/build-fimtyper.yml).
 
 ### ST131Typer
 
@@ -754,8 +757,11 @@ first. See [docs/setup-gadi-rg42.md](docs/setup-gadi-rg42.md#inode-warnings-on-g
 - `scripts/create_bactopia_input.sh`: builds the ONT/assembly FOFN from an input directory
 - `scripts/validate_metadata_samples.py`: checks every input sample exists in the metadata sheet
 - `scripts/download_bactopia_datasets.sh`: downloads the custom datasets into `DATASETS_CACHE` on demand
+- `scripts/download_kraken2_db.sh`: find-or-download a Kraken2/Bracken database into `KRAKEN2_DB`
 - `scripts/install_optional_local_tools.sh`: installs a local mlst/seqkit env and ST131Typer
 - `scripts/pull_local_containers.sh`: pre-stages the local-backend tool containers into `SING_CACHE` (for offline hosts)
+- `containers/fimtyper/Dockerfile`: recipe for the published FimTyper image
+- `.github/workflows/build-fimtyper.yml`: builds and publishes the FimTyper image to GHCR
 
 ## Documentation
 

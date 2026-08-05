@@ -17,7 +17,7 @@ Existing images are reused (skipped) unless --force is given.
 Options:
   --dest DIR        Where to store the .sif files (default: $SING_CACHE, else ~/singularity_cache)
   --engine NAME     Container engine: singularity or apptainer (default: auto-detect)
-  --with-fimtyper   Also pull FimTyper from FIMTYPER_CONTAINER_URI (no public default)
+  --with-fimtyper   Also pull FimTyper (default: the published GHCR image)
   --force           Re-pull and overwrite images that already exist
   --help            Print this message
 
@@ -25,7 +25,7 @@ Environment overrides:
   SING_CACHE                destination dir (same as --dest)
   MLST_CONTAINER_URI        default: docker://quay.io/biocontainers/mlst:2.33.1--hdfd78af_0
   KLEBORATE_CONTAINER_URI   default: docker://quay.io/biocontainers/kleborate:2.3.2--pyhdfd78af_0
-  FIMTYPER_CONTAINER_URI    required for --with-fimtyper (e.g. docker://... or a .sif URI)
+  FIMTYPER_CONTAINER_URI    default: oras://ghcr.io/sethiyap/agar-bactopia-fimtyper:1.0
 EOF
 }
 
@@ -47,7 +47,7 @@ force=0
 
 mlst_uri="${MLST_CONTAINER_URI:-docker://quay.io/biocontainers/mlst:2.33.1--hdfd78af_0}"
 kleborate_uri="${KLEBORATE_CONTAINER_URI:-docker://quay.io/biocontainers/kleborate:2.3.2--pyhdfd78af_0}"
-fimtyper_uri="${FIMTYPER_CONTAINER_URI:-}"
+fimtyper_uri="${FIMTYPER_CONTAINER_URI:-oras://ghcr.io/sethiyap/agar-bactopia-fimtyper:1.0}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -124,7 +124,7 @@ kleborate_out=$(pull_one "kleborate" "$kleborate_uri" "kleborate-2.3.2--pyhdfd78
 
 fimtyper_out=""
 if [[ $with_fimtyper -eq 1 ]]; then
-  [[ -n $fimtyper_uri ]] || fail "--with-fimtyper requires FIMTYPER_CONTAINER_URI to be set."
+  [[ -n $fimtyper_uri ]] || fail "FIMTYPER_CONTAINER_URI is empty; unset it to use the default or provide a URI."
   fimtyper_out=$(pull_one "fimtyper" "$fimtyper_uri" "fimtyper.sif")
 fi
 
